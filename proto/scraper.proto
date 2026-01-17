@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package scraper;
+
+option go_package = "receipt-bot/internal/adapters/python/pb";
+
+// ScraperService handles content extraction from various platforms
+service ScraperService {
+  // ScrapeContent extracts content (captions, transcript) from a URL
+  rpc ScrapeContent(ScrapeRequest) returns (ScrapeResponse);
+}
+
+// Platform represents supported content platforms
+enum Platform {
+  PLATFORM_UNKNOWN = 0;
+  PLATFORM_TIKTOK = 1;
+  PLATFORM_YOUTUBE = 2;
+  PLATFORM_INSTAGRAM = 3;
+  PLATFORM_WEB = 4;
+}
+
+// ScrapeRequest contains the URL and platform to scrape
+message ScrapeRequest {
+  string url = 1;
+  Platform platform = 2;
+  bool download_video = 3;  // Whether to download video for transcription
+  bool transcribe = 4;       // Whether to transcribe audio
+}
+
+// ScrapeResponse contains extracted content
+message ScrapeResponse {
+  string captions = 1;           // Video captions/description
+  string transcript = 2;          // Video transcript from audio
+  string original_url = 3;        // Original video URL
+  map<string, string> metadata = 4;  // Additional metadata (author, title, etc.)
+  Error error = 5;               // Error if scraping failed
+}
+
+// Error represents an error that occurred during scraping
+message Error {
+  string message = 1;
+  string code = 2;
+}

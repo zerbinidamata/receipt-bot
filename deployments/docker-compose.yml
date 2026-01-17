@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  python-service:
+    build:
+      context: ..
+      dockerfile: deployments/python-service.Dockerfile
+    container_name: receipt-bot-python
+    ports:
+      - "50051:50051"
+    environment:
+      - TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-google-stt}
+      - GOOGLE_CLOUD_CREDENTIALS_PATH=/app/credentials/google-cloud-credentials.json
+      - GRPC_PORT=50051
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/recipe-bot
+    volumes:
+      # Mount credentials (create these files before running)
+      - ${GOOGLE_CLOUD_CREDENTIALS_PATH}:/app/credentials/google-cloud-credentials.json:ro
+      # Mount temp directory for video processing
+      - /tmp/recipe-bot:/tmp/recipe-bot
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50051'); channel.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  go-service:
+    build:
+      context: ..
+      dockerfile: deployments/go-service.Dockerfile
+    container_name: receipt-bot-go
+    depends_on:
+      python-service:
+        condition: service_healthy
+    environment:
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_DEBUG=${TELEGRAM_DEBUG:-false}
+
+      # LLM Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # Firebase
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_CREDENTIALS_PATH=/app/credentials/firebase-credentials.json
+
+      # Python Service
+      - PYTHON_SERVICE_URL=python-service:50051
+      - PYTHON_SERVICE_TIMEOUT=${PYTHON_SERVICE_TIMEOUT:-300}
+
+      # Application
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
+      - APP_PORT=8080
+    volumes:
+      # Mount Firebase credentials
+      - ${FIREBASE_CREDENTIALS_PATH}:/app/credentials/firebase-credentials.json:ro
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+
+networks:
+  default:
+    name: receipt-bot-network

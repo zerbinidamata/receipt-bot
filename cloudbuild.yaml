@@ -1,0 +1,125 @@
+# Cloud Build configuration for Recipe Bot
+# Deploys both Go (Telegram bot) and Python (scraper) services to Cloud Run
+
+substitutions:
+  _REGION: us-central1
+  _GO_SERVICE_NAME: recipe-bot
+  _PYTHON_SERVICE_NAME: recipe-bot-scraper
+
+steps:
+  # Build Python service image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:latest'
+      - '-f'
+      - 'python-service/Dockerfile'
+      - 'python-service'
+    id: 'build-python'
+
+  # Build Go service image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:latest'
+      - '.'
+    id: 'build-go'
+
+  # Push Python service image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:$COMMIT_SHA'
+    id: 'push-python'
+    waitFor: ['build-python']
+
+  # Push Python service latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:latest'
+    id: 'push-python-latest'
+    waitFor: ['build-python']
+
+  # Push Go service image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:$COMMIT_SHA'
+    id: 'push-go'
+    waitFor: ['build-go']
+
+  # Push Go service latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:latest'
+    id: 'push-go-latest'
+    waitFor: ['build-go']
+
+  # Deploy Python service to Cloud Run (internal, no public access)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_PYTHON_SERVICE_NAME}'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--no-allow-unauthenticated'
+      - '--port'
+      - '50051'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '300'
+      - '--set-env-vars'
+      - 'TRANSCRIPTION_PROVIDER=elevenlabs'
+    id: 'deploy-python'
+    waitFor: ['push-python']
+
+  # Deploy Go service to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_GO_SERVICE_NAME}'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '300'
+    id: 'deploy-go'
+    waitFor: ['push-go', 'deploy-python']
+
+images:
+  - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/${_GO_SERVICE_NAME}:latest'
+  - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/${_PYTHON_SERVICE_NAME}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

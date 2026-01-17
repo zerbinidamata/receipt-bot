@@ -1,0 +1,71 @@
+# Git
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Credentials
+*-credentials.json
+*-adminsdk-*.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go specific
+vendor/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+coverage.txt
+*.coverprofile
+
+# Documentation (don't need in container)
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Database files
+*.db
+*.sqlite
+
+# Deployment scripts (not needed in container)
+scripts/
+deployments/*.md

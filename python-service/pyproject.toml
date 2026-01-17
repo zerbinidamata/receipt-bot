@@ -1,0 +1,80 @@
+[tool.poetry]
+name = "receipt-bot-python-service"
+version = "1.0.0"
+description = "Python microservice for video scraping and transcription"
+authors = ["Rafael Zerbini"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# gRPC
+grpcio = "^1.66.1"
+grpcio-tools = "^1.66.1"
+protobuf = "^5.28.3"
+
+# Video downloading
+yt-dlp = "^2024.12.6"
+
+# Instagram scraping
+instaloader = "^4.13.1"
+
+# Web scraping
+beautifulsoup4 = "^4.12.3"
+requests = "^2.32.3"
+lxml = "^5.3.0"
+
+# Video processing
+ffmpeg-python = "^0.2.0"
+
+# ElevenLabs Speech-to-Text (default, recommended)
+elevenlabs = "^1.0.0"
+
+# Utilities
+python-dotenv = "^1.0.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+pytest-cov = "^4.1.0"
+black = "^24.0.0"
+isort = "^5.13.0"
+mypy = "^1.8.0"
+
+[tool.poetry.group.google-stt]
+optional = true
+
+[tool.poetry.group.google-stt.dependencies]
+google-cloud-speech = "^2.28.0"
+
+[tool.poetry.group.whisper]
+optional = true
+
+[tool.poetry.group.whisper.dependencies]
+openai-whisper = "^20231117"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=src --cov-report=html --cov-report=term"

@@ -1,0 +1,239 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
+	"receipt-bot/internal/ports"
+)
+
+// contains checks if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// GeminiAdapter implements the LLMPort using Google Gemini
+type GeminiAdapter struct {
+	client *genai.Client
+	model  string
+}
+
+// NewGeminiAdapter creates a new Gemini adapter
+func NewGeminiAdapter(apiKey string, model string) (*GeminiAdapter, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("Gemini API key is required")
+	}
+
+	if model == "" {
+		model = "gemini-pro" // Default to stable, widely available model
+	}
+
+	// Normalize model name - handle common variations
+	model = normalizeModelName(model)
+	
+	// If user specified "gemini-1.5-flash" without -latest, try with -latest suffix for better compatibility
+	// Also try gemini-pro as fallback if flash models aren't available
+	if model == "gemini-1.5-flash" {
+		model = "gemini-1.5-flash-latest"
+	}
+
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+	}
+
+	return &GeminiAdapter{
+		client: client,
+		model:  model,
+	}, nil
+}
+
+// normalizeModelName normalizes Gemini model names to the correct format
+func normalizeModelName(model string) string {
+	// Map common model name variations to correct format
+	modelMap := map[string]string{
+		"gemini-1.5-flash":      "gemini-1.5-flash",
+		"gemini-1.5-flash-latest": "gemini-1.5-flash-latest",
+		"gemini-1.5-pro":        "gemini-1.5-pro",
+		"gemini-1.5-pro-latest": "gemini-1.5-pro-latest",
+		"gemini-pro":            "gemini-pro",
+		"gemini-1.0-pro":        "gemini-1.0-pro",
+	}
+
+	if normalized, ok := modelMap[model]; ok {
+		return normalized
+	}
+
+	// If not in map, return as-is (might be a valid model name we don't know about)
+	return model
+}
+
+// Close closes the Gemini client
+func (a *GeminiAdapter) Close() error {
+	return a.client.Close()
+}
+
+// ExtractRecipe implements the LLMPort interface
+func (a *GeminiAdapter) ExtractRecipe(ctx context.Context, text string) (*ports.RecipeExtraction, error) {
+	model := a.client.GenerativeModel(a.model)
+
+	// Configure model for JSON output
+	model.SetTemperature(0.3) // Lower temperature for more deterministic output
+	model.ResponseMIMEType = "application/json"
+
+	// Build the prompt
+	prompt := fmt.Sprintf("%s\n\n%s", SystemPrompt, BuildUserPrompt(text))
+
+	// Generate content
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		// Provide helpful error message for model not found errors
+		errStr := err.Error()
+		if contains(errStr, "not found") || contains(errStr, "not supported") {
+			return nil, fmt.Errorf("Gemini API call failed: %w\n\n"+
+				"Troubleshooting:\n"+
+				"1. Verify the model name is correct. Try: gemini-1.5-flash-latest, gemini-1.5-pro, or gemini-pro\n"+
+				"2. Check your API key has access to the requested model\n"+
+				"3. Update LLM_MODEL in your .env file to a supported model name", err)
+		}
+		return nil, fmt.Errorf("Gemini API call failed: %w", err)
+	}
+
+	// Extract text from response
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response from Gemini")
+	}
+
+	// Get the text response
+	var responseText string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if textPart, ok := part.(genai.Text); ok {
+			responseText += string(textPart)
+		}
+	}
+
+	// Log raw response for debugging (first 1000 chars)
+	responsePreview := responseText
+	if len(responsePreview) > 1000 {
+		responsePreview = responsePreview[:1000] + "..."
+	}
+	fmt.Printf("[DEBUG] Gemini raw response (preview): %s\n", responsePreview)
+
+	// Clean up response - remove markdown code blocks if present
+	cleanedResponse := cleanJSONResponse(responseText)
+
+	// Parse JSON response
+	var recipeJSON recipeJSON
+	if err := json.Unmarshal([]byte(cleanedResponse), &recipeJSON); err != nil {
+		fmt.Printf("[DEBUG] Failed to parse JSON. Raw response: %s\n", responseText)
+		return nil, fmt.Errorf("failed to parse Gemini response as JSON: %w", err)
+	}
+
+	fmt.Printf("[DEBUG] Parsed JSON - Ingredients: %d, Instructions: %d\n", len(recipeJSON.Ingredients), len(recipeJSON.Instructions))
+
+	// Convert to domain format
+	extraction := convertJSONToExtraction(&recipeJSON)
+
+	return extraction, nil
+}
+
+// cleanJSONResponse removes markdown code blocks and extra whitespace from JSON response
+func cleanJSONResponse(response string) string {
+	// Remove markdown code blocks (```json ... ``` or ``` ... ```)
+	codeBlockRegex := regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)\\s*```")
+	matches := codeBlockRegex.FindStringSubmatch(response)
+	if len(matches) > 1 {
+		response = matches[1]
+	}
+
+	// Trim whitespace
+	response = strings.TrimSpace(response)
+
+	// Find JSON object boundaries if there's extra text
+	startIdx := strings.Index(response, "{")
+	endIdx := strings.LastIndex(response, "}")
+	if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
+		response = response[startIdx : endIdx+1]
+	}
+
+	return response
+}
+
+// recipeJSON represents the JSON structure from the LLM
+type recipeJSON struct {
+	Title            string              `json:"title"`
+	Ingredients      []ingredientJSON    `json:"ingredients"`
+	Instructions     []instructionJSON   `json:"instructions"`
+	PrepTimeMinutes  *int                `json:"prep_time_minutes"`
+	CookTimeMinutes  *int                `json:"cook_time_minutes"`
+	Servings         *int                `json:"servings"`
+}
+
+type ingredientJSON struct {
+	Name     string `json:"name"`
+	Quantity string `json:"quantity"`
+	Unit     string `json:"unit"`
+	Notes    string `json:"notes"`
+}
+
+type instructionJSON struct {
+	StepNumber      int      `json:"step_number"`
+	Text            string   `json:"text"`
+	DurationMinutes *float64 `json:"duration_minutes"`
+}
+
+// convertJSONToExtraction converts the JSON response to domain format
+func convertJSONToExtraction(recipe *recipeJSON) *ports.RecipeExtraction {
+	extraction := &ports.RecipeExtraction{
+		Title:       recipe.Title,
+		Ingredients: make([]ports.IngredientData, len(recipe.Ingredients)),
+		Instructions: make([]ports.InstructionData, len(recipe.Instructions)),
+	}
+
+	// Convert ingredients
+	for i, ing := range recipe.Ingredients {
+		extraction.Ingredients[i] = ports.IngredientData{
+			Name:     ing.Name,
+			Quantity: ing.Quantity,
+			Unit:     ing.Unit,
+			Notes:    ing.Notes,
+		}
+	}
+
+	// Convert instructions
+	for i, inst := range recipe.Instructions {
+		var duration *time.Duration
+		if inst.DurationMinutes != nil && *inst.DurationMinutes > 0 {
+			d := time.Duration(*inst.DurationMinutes * float64(time.Minute))
+			duration = &d
+		}
+
+		extraction.Instructions[i] = ports.InstructionData{
+			StepNumber: inst.StepNumber,
+			Text:       inst.Text,
+			Duration:   duration,
+		}
+	}
+
+	// Convert times
+	if recipe.PrepTimeMinutes != nil && *recipe.PrepTimeMinutes > 0 {
+		d := time.Duration(*recipe.PrepTimeMinutes) * time.Minute
+		extraction.PrepTime = &d
+	}
+
+	if recipe.CookTimeMinutes != nil && *recipe.CookTimeMinutes > 0 {
+		d := time.Duration(*recipe.CookTimeMinutes) * time.Minute
+		extraction.CookTime = &d
+	}
+
+	extraction.Servings = recipe.Servings
+
+	return extraction
+}
