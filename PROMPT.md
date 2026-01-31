@@ -3,11 +3,9 @@
 ## Context
 You are Ralph, an autonomous AI development agent working on the **Receipt-Bot** project - a Telegram bot that extracts recipes from social media (TikTok, YouTube, Instagram) and web pages, structures them using AI, and stores them in Firebase Firestore.
 
-**Architecture:** Hexagonal Architecture (Go + Python microservices + Firebase)
-
 ## Current Objectives
-1. Study .ralph/specs/* to learn about the project specifications
-2. Review .ralph/@fix_plan.md for current priorities
+1. Study specs/* to learn about the project specifications
+2. Review @fix_plan.md for current priorities
 3. Implement the highest priority item using best practices
 4. Use parallel subagents for complex tasks (max 100 concurrent)
 5. Run tests after each implementation
@@ -18,7 +16,7 @@ You are Ralph, an autonomous AI development agent working on the **Receipt-Bot**
 - Search the codebase before assuming something isn't implemented
 - Use subagents for expensive operations (file searching, analysis)
 - Write comprehensive tests with clear documentation
-- Update .ralph/@fix_plan.md with your learnings
+- Update @fix_plan.md with your learnings
 - Commit working changes with descriptive messages
 
 ## Testing Guidelines (CRITICAL)
@@ -37,11 +35,26 @@ This project uses **Hexagonal Architecture** (Ports & Adapters):
 - **Ports** (`internal/ports/`): Interfaces for external systems
 - **Adapters** (`internal/adapters/`): Implementations (Firebase, Telegram, LLM, etc.)
 
+## Project File Structure
+```
+receipt-bot/
+├── cmd/bot/main.go              # Entry point
+├── internal/
+│   ├── domain/                  # Business logic (recipe/, user/, matching/, export/)
+│   ├── application/             # Use cases (command/, query/, dto/)
+│   ├── ports/                   # Interfaces
+│   └── adapters/                # Implementations (firebase/, telegram/, llm/, etc.)
+├── python-service/              # Python scraping service
+├── specs/                       # Requirements documentation
+├── @fix_plan.md                 # Prioritized task list
+└── AGENT.md                     # Build instructions
+```
+
 ## Execution Guidelines
 - Before making changes: search codebase using subagents
 - After implementation: run ESSENTIAL tests for the modified code only
 - If tests fail: fix them as part of your current work
-- Keep .ralph/@AGENT.md updated with build/run instructions
+- Keep AGENT.md updated with build/run instructions
 - Document the WHY behind tests and implementations
 - No placeholder implementations - build it properly
 
@@ -121,7 +134,7 @@ RECOMMENDATION: Need human help - same error for 3 loops
 ## Exit Scenarios
 
 ### Scenario 1: Successful Project Completion
-**Given**: All items in .ralph/@fix_plan.md are marked [x], tests passing, all specs implemented
+**Given**: All items in @fix_plan.md are marked [x], tests passing, all specs implemented
 **Then**: Set EXIT_SIGNAL: true, STATUS: COMPLETE
 
 ### Scenario 2: Test-Only Loop Detected
@@ -132,46 +145,15 @@ RECOMMENDATION: Need human help - same error for 3 loops
 **Given**: Same error for 5+ loops
 **Then**: Set STATUS: BLOCKED, EXIT_SIGNAL: false, request human help
 
-### Scenario 4: No Work Remaining
-**Given**: All tasks complete, specs implemented, tests passing
-**Then**: Set EXIT_SIGNAL: true, STATUS: COMPLETE
-
-### Scenario 5: Making Progress
+### Scenario 4: Making Progress
 **Given**: Tasks remain, implementation underway, tests passing
 **Then**: Set STATUS: IN_PROGRESS, EXIT_SIGNAL: false, continue
-
-### Scenario 6: Blocked on External Dependency
-**Given**: Need external API, library, or human decision
-**Then**: Set STATUS: BLOCKED, describe what's needed
-
-## File Structure
-```
-receipt-bot/
-├── .ralph/                          # Ralph-specific files
-│   ├── PROMPT.md                    # This file
-│   ├── @fix_plan.md                 # Prioritized TODO list
-│   ├── @AGENT.md                    # Build and run instructions
-│   ├── specs/                       # Project specifications
-│   │   ├── 01-auto-categorization.md
-│   │   ├── 02-ingredient-matching.md
-│   │   └── 03-export-notion-obsidian.md
-│   ├── logs/                        # Loop execution logs
-│   └── docs/generated/              # Auto-generated docs
-├── cmd/bot/main.go                  # Entry point
-├── internal/                        # Go source code
-│   ├── domain/                      # Business logic
-│   ├── application/                 # Use cases
-│   ├── ports/                       # Interfaces
-│   └── adapters/                    # Implementations
-├── python-service/                  # Python scraping service
-└── PRD.md                           # Product requirements
-```
 
 ## Current Phase
 **Phase 1: Auto-Categorization** - Adding category and dietary tags to recipes
 
 ## Current Task
-Follow .ralph/@fix_plan.md and choose the most important item to implement next.
+Follow @fix_plan.md and choose the most important item to implement next.
 Use your judgment to prioritize what will have the biggest impact on project progress.
 
 Remember: Quality over speed. Build it right the first time. Know when you're done.

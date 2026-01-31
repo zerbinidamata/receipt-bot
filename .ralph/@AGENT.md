@@ -1,158 +1,155 @@
-# Agent Build Instructions
+# Receipt-Bot Agent Build Instructions
+
+## Project Overview
+Receipt-Bot is a Telegram bot that extracts recipes from TikTok, YouTube, Instagram, and web pages using AI.
+
+**Architecture:** Hexagonal Architecture (Go + Python microservices + Firebase)
 
 ## Project Setup
-```bash
-# Install dependencies (example for Node.js project)
-npm install
 
-# Or for Python project
+### Go Service (Main Bot)
+```bash
+# Install Go dependencies
+go mod download
+
+# Build the bot
+go build -o main ./cmd/bot
+
+# Run locally (requires .env file)
+./main
+```
+
+### Python Service (Scraping/Transcription)
+```bash
+cd python-service
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Or for Rust project  
-cargo build
+# Run gRPC server
+python run_server.py
+```
+
+### Docker (Full Stack)
+```bash
+# Build and run all services
+docker-compose -f deployments/docker-compose.yml up --build
+
+# Or build individually
+docker build -f deployments/go-service.Dockerfile -t receipt-bot-go .
+docker build -f deployments/python-service.Dockerfile -t receipt-bot-python .
 ```
 
 ## Running Tests
-```bash
-# Node.js
-npm test
 
-# Python
+### Go Tests
+```bash
+# Run all tests
+go test ./...
+
+# Run with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Run specific package tests
+go test ./internal/domain/recipe/...
+go test ./internal/application/...
+
+# Run with verbose output
+go test -v ./...
+```
+
+### Python Tests
+```bash
+cd python-service
 pytest
-
-# Rust
-cargo test
+pytest --cov=src tests/
 ```
 
-## Build Commands
-```bash
-# Production build
-npm run build
-# or
-cargo build --release
+## Environment Variables
+Required in `.env` file:
+```
+TELEGRAM_BOT_TOKEN=your_token
+FIREBASE_PROJECT_ID=your_project
+FIREBASE_CREDENTIALS_PATH=./firebase-credentials.json
+GEMINI_API_KEY=your_key
+PYTHON_SERVICE_URL=localhost:50051
 ```
 
-## Development Server
-```bash
-# Start development server
-npm run dev
-# or
-cargo run
+## Key Directories
 ```
+cmd/bot/                    # Application entry point
+internal/
+  domain/                   # Business logic (entities, value objects)
+    recipe/                 # Recipe aggregate
+    user/                   # User entity
+  application/              # Use cases (commands, queries)
+    command/               # Write operations
+    query/                 # Read operations
+    dto/                   # Data transfer objects
+  ports/                    # Interface definitions
+  adapters/                 # External implementations
+    firebase/              # Firestore repository
+    llm/                   # Gemini/OpenAI adapters
+    telegram/              # Bot handlers
+    python/                # gRPC client
+  config/                   # Configuration management
+python-service/             # Python microservice
+  src/scrapers/            # Platform-specific scrapers
+  src/video/               # Video/audio processing
+proto/                      # gRPC definitions
+deployments/                # Docker configs
+```
+
+## Development Workflow
+
+1. **Before changes**: Search codebase to understand existing patterns
+2. **Make changes**: Follow hexagonal architecture (ports → adapters)
+3. **Test**: Run `go test ./...` after each implementation
+4. **Commit**: Use conventional commits (`feat:`, `fix:`, `test:`)
 
 ## Key Learnings
-- Update this section when you learn new build optimizations
-- Document any gotchas or special setup requirements
-- Keep track of the fastest test/build cycle
+
+### Build Optimizations
+- Go builds are fast, no special optimization needed
+- Python service can be slow to start (yt-dlp initialization)
+- Use `go build -ldflags="-s -w"` for smaller binaries
+
+### Testing Patterns
+- Domain tests use pure unit tests (no mocks needed)
+- Application tests use interface mocks
+- Integration tests require Firebase emulator or test project
+
+### Common Issues
+- Firebase credentials must be valid JSON file
+- Gemini API has rate limits (adjust retry logic)
+- TikTok scraping may fail due to anti-bot measures
 
 ## Feature Development Quality Standards
 
-**CRITICAL**: All new features MUST meet the following mandatory requirements before being considered complete.
-
 ### Testing Requirements
+- Minimum 85% code coverage for new code
+- All tests must pass
+- Unit tests for domain logic
+- Integration tests for adapters
 
-- **Minimum Coverage**: 85% code coverage ratio required for all new code
-- **Test Pass Rate**: 100% - all tests must pass, no exceptions
-- **Test Types Required**:
-  - Unit tests for all business logic and services
-  - Integration tests for API endpoints or main functionality
-  - End-to-end tests for critical user workflows
-- **Coverage Validation**: Run coverage reports before marking features complete:
-  ```bash
-  # Examples by language/framework
-  npm run test:coverage
-  pytest --cov=src tests/ --cov-report=term-missing
-  cargo tarpaulin --out Html
-  ```
-- **Test Quality**: Tests must validate behavior, not just achieve coverage metrics
-- **Test Documentation**: Complex test scenarios must include comments explaining the test strategy
+### Git Workflow
+- Use conventional commits
+- Push after completing each feature
+- Update .ralph/@fix_plan.md with progress
 
-### Git Workflow Requirements
+### Documentation
+- Update inline comments for complex logic
+- Keep this file updated with new patterns
+- Document breaking changes
 
-Before moving to the next feature, ALL changes must be:
+## Current Development Focus
+See `.ralph/@fix_plan.md` for prioritized task list.
 
-1. **Committed with Clear Messages**:
-   ```bash
-   git add .
-   git commit -m "feat(module): descriptive message following conventional commits"
-   ```
-   - Use conventional commit format: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, etc.
-   - Include scope when applicable: `feat(api):`, `fix(ui):`, `test(auth):`
-   - Write descriptive messages that explain WHAT changed and WHY
-
-2. **Pushed to Remote Repository**:
-   ```bash
-   git push origin <branch-name>
-   ```
-   - Never leave completed features uncommitted
-   - Push regularly to maintain backup and enable collaboration
-   - Ensure CI/CD pipelines pass before considering feature complete
-
-3. **Branch Hygiene**:
-   - Work on feature branches, never directly on `main`
-   - Branch naming convention: `feature/<feature-name>`, `fix/<issue-name>`, `docs/<doc-update>`
-   - Create pull requests for all significant changes
-
-4. **Ralph Integration**:
-   - Update .ralph/@fix_plan.md with new tasks before starting work
-   - Mark items complete in .ralph/@fix_plan.md upon completion
-   - Update .ralph/PROMPT.md if development patterns change
-   - Test features work within Ralph's autonomous loop
-
-### Documentation Requirements
-
-**ALL implementation documentation MUST remain synchronized with the codebase**:
-
-1. **Code Documentation**:
-   - Language-appropriate documentation (JSDoc, docstrings, etc.)
-   - Update inline comments when implementation changes
-   - Remove outdated comments immediately
-
-2. **Implementation Documentation**:
-   - Update relevant sections in this AGENT.md file
-   - Keep build and test commands current
-   - Update configuration examples when defaults change
-   - Document breaking changes prominently
-
-3. **README Updates**:
-   - Keep feature lists current
-   - Update setup instructions when dependencies change
-   - Maintain accurate command examples
-   - Update version compatibility information
-
-4. **AGENT.md Maintenance**:
-   - Add new build patterns to relevant sections
-   - Update "Key Learnings" with new insights
-   - Keep command examples accurate and tested
-   - Document new testing patterns or quality gates
-
-### Feature Completion Checklist
-
-Before marking ANY feature as complete, verify:
-
-- [ ] All tests pass with appropriate framework command
-- [ ] Code coverage meets 85% minimum threshold
-- [ ] Coverage report reviewed for meaningful test quality
-- [ ] Code formatted according to project standards
-- [ ] Type checking passes (if applicable)
-- [ ] All changes committed with conventional commit messages
-- [ ] All commits pushed to remote repository
-- [ ] .ralph/@fix_plan.md task marked as complete
-- [ ] Implementation documentation updated
-- [ ] Inline code comments updated or added
-- [ ] .ralph/@AGENT.md updated (if new patterns introduced)
-- [ ] Breaking changes documented
-- [ ] Features tested within Ralph loop (if applicable)
-- [ ] CI/CD pipeline passes
-
-### Rationale
-
-These standards ensure:
-- **Quality**: High test coverage and pass rates prevent regressions
-- **Traceability**: Git commits and .ralph/@fix_plan.md provide clear history of changes
-- **Maintainability**: Current documentation reduces onboarding time and prevents knowledge loss
-- **Collaboration**: Pushed changes enable team visibility and code review
-- **Reliability**: Consistent quality gates maintain production stability
-- **Automation**: Ralph integration ensures continuous development practices
-
-**Enforcement**: AI agents should automatically apply these standards to all feature development tasks without requiring explicit instruction for each task.
+**Phase 1**: Auto-Categorization (in progress)
+**Phase 2**: Ingredient Matching
+**Phase 3**: Export to Notion/Obsidian
