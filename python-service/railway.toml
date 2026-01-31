@@ -1,12 +1,12 @@
 # Railway configuration for Python Scraper Service
 # This is the gRPC service for video scraping and transcription
+# Set Root Directory to "python-service" in Railway dashboard
 
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python run_server.py"
 healthcheckTimeout = 300
 restartPolicyType = "always"
 numReplicas = 1
