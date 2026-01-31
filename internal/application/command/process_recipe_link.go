@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"receipt-bot/internal/domain/matching"
 	"receipt-bot/internal/domain/recipe"
 	"receipt-bot/internal/ports"
 )
@@ -169,17 +170,73 @@ func (c *ProcessRecipeLinkCommand) Execute(ctx context.Context, url string, user
 		rec.SetServings(*extraction.Servings)
 	}
 
-	// Step 10: Validate recipe
+	// Set category fields from LLM extraction
+	if extraction.Category != "" {
+		rec.SetCategory(recipe.CategoryFromLLM(extraction.Category))
+	}
+	if extraction.Cuisine != "" {
+		rec.SetCuisine(extraction.Cuisine)
+	}
+	if len(extraction.DietaryTags) > 0 {
+		dietaryTags := recipe.ParseDietaryTags(extraction.DietaryTags)
+		rec.SetDietaryTags(dietaryTags)
+	}
+	if len(extraction.Tags) > 0 {
+		rec.SetTags(extraction.Tags)
+	}
+
+	// Set multilingual fields from LLM extraction
+	if extraction.SourceLanguage != "" {
+		rec.SetSourceLanguage(extraction.SourceLanguage)
+	}
+	if extraction.TranslatedTitle != nil || len(extraction.TranslatedIngredients) > 0 || len(extraction.TranslatedInstructions) > 0 {
+		// Convert translated ingredients
+		var translatedIngs []recipe.Ingredient
+		if len(extraction.TranslatedIngredients) > 0 {
+			translatedIngs = make([]recipe.Ingredient, 0, len(extraction.TranslatedIngredients))
+			for _, ingData := range extraction.TranslatedIngredients {
+				ing, err := recipe.NewIngredient(ingData.Name, ingData.Quantity, ingData.Unit, ingData.Notes)
+				if err == nil {
+					translatedIngs = append(translatedIngs, ing)
+				}
+			}
+		}
+		// Convert translated instructions
+		var translatedInsts []recipe.Instruction
+		if len(extraction.TranslatedInstructions) > 0 {
+			translatedInsts = make([]recipe.Instruction, 0, len(extraction.TranslatedInstructions))
+			for _, instData := range extraction.TranslatedInstructions {
+				inst, err := recipe.NewInstruction(instData.StepNumber, instData.Text, instData.Duration)
+				if err == nil {
+					translatedInsts = append(translatedInsts, inst)
+				}
+			}
+		}
+		rec.SetTranslations(extraction.TranslatedTitle, translatedIngs, translatedInsts)
+	}
+
+	// Step 10: Normalize and cache ingredients for faster matching
+	normalizer := matching.NewRuleBasedNormalizer()
+	normalizedIngredients := make([]string, 0, len(ingredients))
+	for _, ing := range ingredients {
+		normalized := normalizer.Normalize(ing.Name())
+		if normalized != "" {
+			normalizedIngredients = append(normalizedIngredients, normalized)
+		}
+	}
+	rec.SetNormalizedIngredients(normalizedIngredients)
+
+	// Step 11: Validate recipe
 	if err := c.recipeService.ValidateRecipe(rec); err != nil {
 		return nil, fmt.Errorf("recipe validation failed: %w", err)
 	}
 
-	// Step 11: Save recipe
+	// Step 13: Save recipe
 	if err := c.recipeRepo.Save(ctx, rec); err != nil {
 		return nil, fmt.Errorf("failed to save recipe: %w", err)
 	}
 
-	// Step 12: Success!
+	// Step 14: Success!
 	if c.messenger != nil {
 		_ = c.messenger.SendProgress(ctx, chatID, "✨ Recipe extracted successfully!")
 	}

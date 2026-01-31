@@ -1,0 +1,13 @@
+# Railway configuration for Recipe Bot (Go service)
+# This is the main Telegram bot service
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "./main"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "always"
+numReplicas = 1

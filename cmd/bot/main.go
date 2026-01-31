@@ -10,12 +10,15 @@ import (
 
 	"receipt-bot/internal/adapters/firebase"
 	"receipt-bot/internal/adapters/llm"
+	"receipt-bot/internal/adapters/notion"
+	"receipt-bot/internal/adapters/obsidian"
 	"receipt-bot/internal/adapters/python"
 	"receipt-bot/internal/adapters/telegram"
 	"receipt-bot/internal/application/command"
 	"receipt-bot/internal/application/query"
 	"receipt-bot/internal/config"
 	"receipt-bot/internal/domain/recipe"
+	"receipt-bot/internal/ports"
 )
 
 func main() {
@@ -71,6 +74,19 @@ func main() {
 		defer geminiAdapter.Close()
 	}
 
+	// Initialize intent detector for conversational interface
+	log.Println("Initializing intent detector...")
+	intentDetector, err := llm.NewIntentDetector(llm.LLMConfig{
+		Provider: cfg.LLM.Provider,
+		APIKey:   cfg.LLM.APIKey,
+		Model:    cfg.LLM.Model,
+	})
+	if err != nil {
+		log.Printf("Warning: Failed to initialize intent detector: %v", err)
+		log.Println("Conversational interface will be disabled")
+		intentDetector = nil
+	}
+
 	// Initialize Telegram bot
 	log.Println("Initializing Telegram bot...")
 	bot, err := telegram.NewBot(telegram.Config{
@@ -99,13 +115,46 @@ func main() {
 
 	listRecipesQuery := query.NewListRecipesQuery(recipeRepo)
 
-	// Initialize handler
-	handler := telegram.NewHandler(
-		bot,
-		processRecipeLinkCmd,
-		getOrCreateUserCmd,
-		listRecipesQuery,
+	matchIngredientsCmd := command.NewMatchIngredientsCommand(recipeRepo)
+
+	managePantryCmd := command.NewManagePantryCommand(userRepo)
+
+	// Initialize exporters
+	obsidianExporter := obsidian.NewExporter()
+
+	// Initialize Notion exporter (optional - only if configured)
+	var notionExporter ports.NotionExporter
+	if cfg.Notion.ClientID != "" && cfg.Notion.ClientSecret != "" {
+		log.Println("Initializing Notion integration...")
+		notionClient := notion.NewClient(notion.Config{
+			ClientID:     cfg.Notion.ClientID,
+			ClientSecret: cfg.Notion.ClientSecret,
+			RedirectURI:  cfg.Notion.RedirectURI,
+		})
+		notionExporter = notion.NewExporter(notionClient, userRepo)
+	} else {
+		log.Println("Notion integration not configured (NOTION_CLIENT_ID and NOTION_CLIENT_SECRET not set)")
+	}
+
+	// Initialize export command
+	exportRecipeCmd := command.NewExportRecipeCommand(
+		recipeRepo,
+		obsidianExporter,
+		notionExporter,
 	)
+
+	// Initialize handler
+	handler := telegram.NewHandler(telegram.HandlerConfig{
+		Bot:                      bot,
+		ProcessRecipeLinkCommand: processRecipeLinkCmd,
+		GetOrCreateUserCommand:   getOrCreateUserCmd,
+		ListRecipesQuery:         listRecipesQuery,
+		MatchIngredientsCommand:  matchIngredientsCmd,
+		ManagePantryCommand:      managePantryCmd,
+		ExportRecipeCommand:      exportRecipeCmd,
+		IntentDetector:           intentDetector,
+		UserRepo:                 userRepo,
+	})
 
 	// Setup graceful shutdown
 	stop := make(chan os.Signal, 1)

@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -78,6 +79,26 @@ func (b *Bot) SendProgress(ctx context.Context, chatID int64, message string) er
 func (b *Bot) SendError(ctx context.Context, chatID int64, errorMsg string) error {
 	text := fmt.Sprintf("❌ *Error*\n\n%s", errorMsg)
 	return b.SendMessage(ctx, chatID, text)
+}
+
+// SendDocument sends a file document to a chat
+func (b *Bot) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	doc := tgbotapi.NewDocument(chatID, tgbotapi.FileReader{
+		Name:   filename,
+		Reader: bytes.NewReader(data),
+	})
+
+	if caption != "" {
+		doc.Caption = caption
+		doc.ParseMode = "Markdown"
+	}
+
+	_, err := b.api.Send(doc)
+	if err != nil {
+		return fmt.Errorf("failed to send document: %w", err)
+	}
+
+	return nil
 }
 
 // Stop stops the bot

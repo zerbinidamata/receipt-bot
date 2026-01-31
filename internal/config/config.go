@@ -12,6 +12,7 @@ type Config struct {
 	LLM      LLMConfig
 	Python   PythonServiceConfig
 	App      AppConfig
+	Notion   NotionConfig
 }
 
 // TelegramConfig holds Telegram bot configuration
@@ -43,6 +44,13 @@ type PythonServiceConfig struct {
 type AppConfig struct {
 	LogLevel string
 	Port     int
+}
+
+// NotionConfig holds Notion OAuth configuration
+type NotionConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURI  string
 }
 
 // Load loads configuration from environment variables and config file
@@ -86,6 +94,11 @@ func Load() (*Config, error) {
 			LogLevel: viper.GetString("APP_LOG_LEVEL"),
 			Port:     viper.GetInt("APP_PORT"),
 		},
+		Notion: NotionConfig{
+			ClientID:     viper.GetString("NOTION_CLIENT_ID"),
+			ClientSecret: viper.GetString("NOTION_CLIENT_SECRET"),
+			RedirectURI:  viper.GetString("NOTION_REDIRECT_URI"),
+		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -119,8 +132,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("FIREBASE_PROJECT_ID is required")
 	}
 
-	if c.Firebase.CredentialsPath == "" {
-		return fmt.Errorf("FIREBASE_CREDENTIALS_PATH is required")
+	// Firebase credentials can come from either file path or JSON environment variable
+	if c.Firebase.CredentialsPath == "" && viper.GetString("GOOGLE_APPLICATION_CREDENTIALS_JSON") == "" {
+		return fmt.Errorf("FIREBASE_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS_JSON is required")
 	}
 
 	if c.LLM.APIKey == "" {

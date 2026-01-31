@@ -3,6 +3,7 @@ package firebase
 import (
 	"context"
 	"fmt"
+	"os"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
@@ -32,17 +33,23 @@ func NewClient(ctx context.Context, config Config) (*Client, error) {
 		return nil, fmt.Errorf("Firebase project ID is required")
 	}
 
-	if config.CredentialsPath == "" {
-		return nil, fmt.Errorf("Firebase credentials path is required")
-	}
-
 	// Initialize Firebase app
 	conf := &firebase.Config{
 		ProjectID:   config.ProjectID,
 		DatabaseURL: config.DatabaseURL,
 	}
 
-	opt := option.WithCredentialsFile(config.CredentialsPath)
+	// Support both file-based credentials and JSON content from environment variable
+	// This allows deployment to Railway/Heroku where secrets are passed as env vars
+	var opt option.ClientOption
+	if credentialsJSON := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON"); credentialsJSON != "" {
+		opt = option.WithCredentialsJSON([]byte(credentialsJSON))
+	} else if config.CredentialsPath != "" {
+		opt = option.WithCredentialsFile(config.CredentialsPath)
+	} else {
+		return nil, fmt.Errorf("Firebase credentials required: set GOOGLE_APPLICATION_CREDENTIALS_JSON or FIREBASE_CREDENTIALS_PATH")
+	}
+
 	app, err := firebase.NewApp(ctx, conf, opt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Firebase app: %w", err)

@@ -91,9 +91,18 @@ func (a *GeminiAdapter) ExtractRecipe(ctx context.Context, text string) (*ports.
 	// Build the prompt
 	prompt := fmt.Sprintf("%s\n\n%s", SystemPrompt, BuildUserPrompt(text))
 
+	// Add timeout to prevent hanging indefinitely
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
 	// Generate content
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := model.GenerateContent(ctxWithTimeout, genai.Text(prompt))
 	if err != nil {
+		// Check for timeout
+		if ctxWithTimeout.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("Gemini API call timed out after 60 seconds. The API may be slow or unresponsive. Please try again")
+		}
+
 		// Provide helpful error message for model not found errors
 		errStr := err.Error()
 		if contains(errStr, "not found") || contains(errStr, "not supported") {
@@ -168,12 +177,22 @@ func cleanJSONResponse(response string) string {
 
 // recipeJSON represents the JSON structure from the LLM
 type recipeJSON struct {
-	Title            string              `json:"title"`
-	Ingredients      []ingredientJSON    `json:"ingredients"`
-	Instructions     []instructionJSON   `json:"instructions"`
-	PrepTimeMinutes  *int                `json:"prep_time_minutes"`
-	CookTimeMinutes  *int                `json:"cook_time_minutes"`
-	Servings         *int                `json:"servings"`
+	Title           string            `json:"title"`
+	Category        string            `json:"category"`
+	Cuisine         string            `json:"cuisine"`
+	DietaryTags     []string          `json:"dietary_tags"`
+	Tags            []string          `json:"tags"`
+	Ingredients     []ingredientJSON  `json:"ingredients"`
+	Instructions    []instructionJSON `json:"instructions"`
+	PrepTimeMinutes *int              `json:"prep_time_minutes"`
+	CookTimeMinutes *int              `json:"cook_time_minutes"`
+	Servings        *int              `json:"servings"`
+
+	// Multilingual support
+	SourceLanguage         string            `json:"source_language"`
+	TranslatedTitle        *string           `json:"translated_title"`
+	TranslatedIngredients  []ingredientJSON  `json:"translated_ingredients"`
+	TranslatedInstructions []instructionJSON `json:"translated_instructions"`
 }
 
 type ingredientJSON struct {
@@ -192,9 +211,19 @@ type instructionJSON struct {
 // convertJSONToExtraction converts the JSON response to domain format
 func convertJSONToExtraction(recipe *recipeJSON) *ports.RecipeExtraction {
 	extraction := &ports.RecipeExtraction{
-		Title:       recipe.Title,
-		Ingredients: make([]ports.IngredientData, len(recipe.Ingredients)),
-		Instructions: make([]ports.InstructionData, len(recipe.Instructions)),
+		Title:          recipe.Title,
+		Category:       recipe.Category,
+		Cuisine:        recipe.Cuisine,
+		DietaryTags:    recipe.DietaryTags,
+		Tags:           recipe.Tags,
+		Ingredients:    make([]ports.IngredientData, len(recipe.Ingredients)),
+		Instructions:   make([]ports.InstructionData, len(recipe.Instructions)),
+		SourceLanguage: recipe.SourceLanguage,
+	}
+
+	// Default source language to English if not specified
+	if extraction.SourceLanguage == "" {
+		extraction.SourceLanguage = "en"
 	}
 
 	// Convert ingredients
@@ -234,6 +263,40 @@ func convertJSONToExtraction(recipe *recipeJSON) *ports.RecipeExtraction {
 	}
 
 	extraction.Servings = recipe.Servings
+
+	// Convert translated title
+	extraction.TranslatedTitle = recipe.TranslatedTitle
+
+	// Convert translated ingredients
+	if len(recipe.TranslatedIngredients) > 0 {
+		extraction.TranslatedIngredients = make([]ports.IngredientData, len(recipe.TranslatedIngredients))
+		for i, ing := range recipe.TranslatedIngredients {
+			extraction.TranslatedIngredients[i] = ports.IngredientData{
+				Name:     ing.Name,
+				Quantity: ing.Quantity,
+				Unit:     ing.Unit,
+				Notes:    ing.Notes,
+			}
+		}
+	}
+
+	// Convert translated instructions
+	if len(recipe.TranslatedInstructions) > 0 {
+		extraction.TranslatedInstructions = make([]ports.InstructionData, len(recipe.TranslatedInstructions))
+		for i, inst := range recipe.TranslatedInstructions {
+			var duration *time.Duration
+			if inst.DurationMinutes != nil && *inst.DurationMinutes > 0 {
+				d := time.Duration(*inst.DurationMinutes * float64(time.Minute))
+				duration = &d
+			}
+
+			extraction.TranslatedInstructions[i] = ports.InstructionData{
+				StepNumber: inst.StepNumber,
+				Text:       inst.Text,
+				Duration:   duration,
+			}
+		}
+	}
 
 	return extraction
 }

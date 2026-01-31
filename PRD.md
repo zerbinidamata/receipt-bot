@@ -9,10 +9,12 @@
 
 ## Executive Summary
 
-This PRD outlines the next phase of development for Receipt-Bot, focusing on three major feature areas:
-1. **Export Integration** - Export recipes to Notion and Obsidian
-2. **Auto-Categorization** - Intelligent categorization by ingredients and dish type
-3. **Ingredient Matching** - Find recipes based on available ingredients
+This PRD outlines the next phase of development for Receipt-Bot, focusing on five major feature areas:
+1. **Auto-Categorization** - Intelligent categorization by ingredients and dish type ✅
+2. **Ingredient Matching** - Find recipes based on available ingredients ✅
+3. **Conversational Interface** - Natural language interactions without commands
+4. **PT-BR Multilingual Support** - Portuguese language support with automatic translation
+5. **Export Integration** - Export recipes to Notion and Obsidian
 
 ---
 
@@ -28,7 +30,301 @@ Receipt-Bot is a Telegram bot that:
 
 ---
 
-## Feature 1: Export to Notion & Obsidian
+## Feature 1: Conversational Interface
+
+### Overview
+Make the bot more conversational by understanding natural language queries instead of requiring explicit commands. Users can type naturally and the bot interprets their intent.
+
+### User Stories
+
+| ID | Story | Priority |
+|----|-------|----------|
+| N1 | As a user, I want to say "Seafood recipes" and see my seafood recipes without using /recipes seafood | High |
+| N2 | As a user, I want to say "Salmon recipe" and get salmon recipes filtered from seafood category | High |
+| N3 | As a user, I want to say "I have chicken and pasta" and see what I can make | High |
+| N4 | As a user, I want the bot to understand variations like "show me pasta" or "pasta dishes" | Medium |
+| N5 | As a user, I want conversational follow-ups like "show me more" after a recipe list | Low |
+
+### Natural Language Examples
+
+```
+User: "Seafood recipes"
+Bot: [Executes /recipes seafood internally, shows seafood recipes]
+
+User: "Salmon recipe"
+Bot: [Filters seafood category for recipes containing salmon in title/ingredients]
+
+User: "I have chicken, rice, and garlic"
+Bot: [Executes ingredient matching, shows recipes user can make]
+
+User: "Quick breakfast ideas"
+Bot: [Filters by breakfast category + quick tag]
+
+User: "What can I cook?"
+Bot: [If pantry exists, runs match; otherwise prompts for ingredients]
+```
+
+### Intent Detection
+
+**Supported Intents:**
+```
+- LIST_RECIPES: "show recipes", "my recipes", "recipe list"
+- FILTER_CATEGORY: "seafood recipes", "pasta dishes", "breakfast ideas"
+- FILTER_INGREDIENT: "salmon recipe", "chicken dishes" (specific ingredient)
+- MATCH_INGREDIENTS: "I have X, Y, Z", "what can I make with..."
+- SHOW_CATEGORIES: "categories", "what types do I have"
+- MANAGE_PANTRY: "add X to pantry", "my pantry"
+- HELP: "help", "how does this work"
+- GREETING: "hi", "hello", "hey"
+```
+
+### Technical Implementation
+
+#### New Port Interface
+```go
+// internal/ports/intent.go
+type IntentDetector interface {
+    DetectIntent(ctx context.Context, text string) (*Intent, error)
+}
+
+type Intent struct {
+    Type        IntentType
+    Category    *recipe.Category  // For FILTER_CATEGORY
+    Ingredients []string          // For MATCH_INGREDIENTS, FILTER_INGREDIENT
+    SearchTerm  string            // For FILTER_INGREDIENT (e.g., "salmon")
+    Confidence  float64
+}
+
+type IntentType string
+const (
+    IntentListRecipes     IntentType = "LIST_RECIPES"
+    IntentFilterCategory  IntentType = "FILTER_CATEGORY"
+    IntentFilterIngredient IntentType = "FILTER_INGREDIENT"
+    IntentMatchIngredients IntentType = "MATCH_INGREDIENTS"
+    IntentShowCategories  IntentType = "SHOW_CATEGORIES"
+    IntentManagePantry    IntentType = "MANAGE_PANTRY"
+    IntentHelp            IntentType = "HELP"
+    IntentGreeting        IntentType = "GREETING"
+    IntentUnknown         IntentType = "UNKNOWN"
+)
+```
+
+#### LLM-Based Intent Detection
+```go
+// internal/adapters/llm/intent.go
+const intentPrompt = `
+Analyze the user message and determine their intent.
+Categories available: Pasta & Noodles, Rice & Grains, Soups & Stews, Salads,
+Meat & Poultry, Seafood, Vegetarian, Desserts & Sweets, Breakfast,
+Appetizers & Snacks, Beverages, Sauces & Condiments, Bread & Baking
+
+Return JSON:
+{
+  "intent": "LIST_RECIPES|FILTER_CATEGORY|FILTER_INGREDIENT|MATCH_INGREDIENTS|...",
+  "category": "category name or null",
+  "ingredients": ["list", "of", "ingredients"] or [],
+  "searchTerm": "specific ingredient to filter by or null",
+  "confidence": 0.0-1.0
+}
+
+User message: %s
+`
+```
+
+#### Handler Updates
+```go
+// internal/adapters/telegram/handlers.go
+func (h *Handler) handleTextMessage(ctx context.Context, message *tgbotapi.Message, userID shared.ID) {
+    text := strings.TrimSpace(message.Text)
+
+    // Check if it's a URL first
+    if isURL(text) {
+        h.handleRecipeLink(ctx, chatID, userID, text)
+        return
+    }
+
+    // Detect intent from natural language
+    intent, err := h.intentDetector.DetectIntent(ctx, text)
+    if err != nil || intent.Type == IntentUnknown {
+        // Fall back to asking for URL
+        h.promptForURL(ctx, chatID)
+        return
+    }
+
+    // Route based on intent
+    h.handleIntent(ctx, chatID, userID, intent)
+}
+```
+
+---
+
+## Feature 2: PT-BR Multilingual Support
+
+### Overview
+Support Portuguese (Brazilian) language throughout the bot. Recipes can be in any language but are stored with translations to both English and Portuguese.
+
+### User Stories
+
+| ID | Story | Priority |
+|----|-------|----------|
+| L1 | As a Brazilian user, I want to interact with the bot in Portuguese | High |
+| L2 | As a user, I want recipes translated to my preferred language | High |
+| L3 | As a user saving a Portuguese recipe, I want it stored with English translation too | High |
+| L4 | As a user, I want to search/filter using Portuguese terms | Medium |
+| L5 | As a user, I want to set my language preference | Medium |
+
+### Language Detection & Translation Flow
+
+```
+Recipe Input (any language) → Detect Language →
+  If English: Store original + translate to PT-BR
+  If Portuguese: Store original + translate to EN
+  If Other: Translate to both EN and PT-BR, store all three
+
+User Query (any language) → Detect Language → Process in detected language
+
+Output → Based on user's language preference (detected from Telegram or /language setting)
+```
+
+### Data Model Updates
+
+```go
+// internal/domain/recipe/entity.go
+type Recipe struct {
+    // ... existing fields
+
+    // Original content
+    OriginalLanguage string  // "en", "pt", "es", etc.
+
+    // English version (always populated)
+    Title        string
+    Ingredients  []Ingredient
+    Instructions []string
+
+    // Portuguese version
+    TitlePT        string
+    IngredientsPT  []Ingredient
+    InstructionsPT []string
+}
+
+// internal/domain/user/entity.go
+type User struct {
+    // ... existing fields
+    LanguagePreference string  // "en", "pt" - defaults to Telegram's language_code
+}
+```
+
+### LLM Prompt Updates
+
+```go
+const extractionPromptMultilingual = `
+Extract the recipe and provide translations.
+
+Detect the original language first.
+
+Return JSON with these fields:
+{
+  "originalLanguage": "en|pt|es|...",
+
+  // English version
+  "title": "...",
+  "ingredients": [...],
+  "instructions": [...],
+
+  // Portuguese (Brazilian) version
+  "titlePT": "...",
+  "ingredientsPT": [...],
+  "instructionsPT": [...],
+
+  // ... other fields (category, cuisine, etc.)
+}
+
+Important:
+- Translate ingredient names naturally (e.g., "chicken breast" → "peito de frango")
+- Translate cooking terms appropriately (e.g., "sauté" → "refogar")
+- Keep measurements in metric for PT-BR
+- Preserve cooking times and temperatures
+`
+```
+
+### User Interaction Examples
+
+**Portuguese User:**
+```
+User: "Receitas de frango"
+Bot: "🍗 Receitas de Frango (3 encontradas)
+1. Frango ao Molho - Carne & Aves | TikTok
+2. Frango Grelhado - Carne & Aves | YouTube
+..."
+
+User: "O que posso fazer com arroz e feijão?"
+Bot: "🍳 Encontrei 2 receitas:
+✅ Combinações Perfeitas:
+1. Arroz com Feijão Tropeiro
+..."
+```
+
+**English User:**
+```
+User: "Chicken recipes"
+Bot: "🍗 Chicken Recipes (3 found)
+1. Chicken in Sauce - Meat & Poultry | TikTok
+..."
+```
+
+### New Telegram Commands
+
+```
+/language           - Show current language preference
+/language pt        - Set language to Portuguese
+/language en        - Set language to English
+```
+
+### Technical Implementation
+
+#### Translation Port
+```go
+// internal/ports/translator.go
+type Translator interface {
+    DetectLanguage(ctx context.Context, text string) (string, error)
+    Translate(ctx context.Context, text string, from, to string) (string, error)
+    TranslateRecipe(ctx context.Context, recipe *recipe.Recipe, targetLang string) error
+}
+```
+
+#### Category Translations
+```go
+// internal/domain/recipe/category_i18n.go
+var CategoryTranslations = map[Category]map[string]string{
+    CategoryPasta: {
+        "en": "Pasta & Noodles",
+        "pt": "Massas & Macarrão",
+    },
+    CategorySeafood: {
+        "en": "Seafood",
+        "pt": "Frutos do Mar",
+    },
+    // ... etc
+}
+
+func (c Category) Localized(lang string) string
+```
+
+#### Firestore Schema Updates
+```
+recipes collection (add fields):
+  originalLanguage: string
+  titlePT: string
+  ingredientsPT: []map
+  instructionsPT: []string
+
+users collection (add fields):
+  languagePreference: string  // "en" or "pt"
+```
+
+---
+
+## Feature 3: Export to Notion & Obsidian
 
 ### Overview
 Allow users to export their saved recipes to external knowledge management tools.
@@ -169,7 +465,7 @@ users collection (add fields):
 
 ---
 
-## Feature 2: Auto-Categorization
+## Feature 4: Auto-Categorization (✅ COMPLETE)
 
 ### Overview
 Automatically categorize recipes by dish type and ingredient composition using AI analysis.
@@ -346,7 +642,7 @@ func (q *ListRecipesQuery) ByCuisine(cuisine string) ([]*dto.RecipeDTO, error)
 
 ---
 
-## Feature 3: Ingredient-Based Recipe Matching
+## Feature 5: Ingredient-Based Recipe Matching (✅ COMPLETE)
 
 ### Overview
 Users can send a list of ingredients they have, and the bot suggests recipes that can be made with those ingredients.
@@ -493,27 +789,48 @@ users collection (add fields):
 
 ## Implementation Phases
 
-### Phase 1: Auto-Categorization
+### Phase 1: Auto-Categorization ✅ COMPLETE
 **Rationale**: Foundation for other features, low risk, immediate value
 
-1. Update domain model with Category, DietaryTags
-2. Modify LLM prompts to include categorization
-3. Update Firestore schema and repository
-4. Add category to recipe display formatting
-5. Implement filter commands (/recipes pasta)
-6. Backfill categories for existing recipes
+1. ✅ Update domain model with Category, DietaryTags
+2. ✅ Modify LLM prompts to include categorization
+3. ✅ Update Firestore schema and repository
+4. ✅ Add category to recipe display formatting
+5. ✅ Implement filter commands (/recipes pasta)
+6. Backfill categories for existing recipes (medium priority)
 
-### Phase 2: Ingredient Matching
+### Phase 2: Ingredient Matching ✅ COMPLETE
 **Rationale**: High user value, builds on categorization
 
-1. Implement ingredient normalizer
-2. Build matching algorithm with scoring
-3. Add pantry storage to user model
-4. Create match command handler
-5. Implement Telegram formatting for match results
-6. Add pantry management commands
+1. ✅ Implement ingredient normalizer
+2. ✅ Build matching algorithm with scoring
+3. ✅ Add pantry storage to user model
+4. ✅ Create match command handler
+5. ✅ Implement Telegram formatting for match results
+6. ✅ Add pantry management commands
 
-### Phase 3: Export Integration
+### Phase 3: Conversational Interface
+**Rationale**: Enhances UX significantly, builds on existing features
+
+1. Create intent detection port interface
+2. Implement LLM-based intent detection
+3. Update text message handler for natural language
+4. Support category filtering via natural language
+5. Support ingredient-based search (e.g., "salmon recipe")
+6. Add conversational pantry management
+
+### Phase 4: PT-BR Multilingual Support
+**Rationale**: Expands user base, internationalization foundation
+
+1. Update Recipe entity with translation fields
+2. Modify LLM prompts for bilingual extraction
+3. Update Firestore schema for multilingual data
+4. Detect user language from Telegram settings
+5. Implement language-aware output formatting
+6. Add /language command for preferences
+7. Translate category names and UI strings
+
+### Phase 5: Export Integration
 **Rationale**: More complex (external APIs), can be developed in parallel
 
 1. Implement Obsidian markdown exporter (simpler)

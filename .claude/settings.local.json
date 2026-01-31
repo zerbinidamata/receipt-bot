@@ -5,7 +5,16 @@
       "Bash(ls:*)",
       "Bash(make generate-python:*)",
       "Bash(go version:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(go build:*)",
+      "Bash(/opt/homebrew/bin/go build ./...)",
+      "Bash(/usr/local/go/bin/go build:*)",
+      "Bash(/opt/homebrew/bin/go vet ./...)",
+      "Bash(/opt/homebrew/bin/go build -v ./cmd/bot)",
+      "Bash(go test:*)",
+      "Bash(/opt/homebrew/bin/go test ./internal/domain/recipe/... ./internal/domain/matching/... ./internal/application/query/... -v)",
+      "Bash(/opt/homebrew/bin/go test:*)",
+      "Bash(/opt/homebrew/bin/go version:*)"
     ]
   }
 }

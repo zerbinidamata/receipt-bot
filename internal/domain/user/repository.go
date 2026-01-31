@@ -15,4 +15,13 @@ type Repository interface {
 
 	// Update updates an existing user
 	Update(ctx context.Context, user *User) error
+
+	// UpdatePantry updates only the pantry items for a user
+	UpdatePantry(ctx context.Context, userID UserID, items []string) error
+
+	// GetPantry retrieves the pantry items for a user
+	GetPantry(ctx context.Context, userID UserID) ([]string, error)
+
+	// UpdateLanguage updates the user's language preference
+	UpdateLanguage(ctx context.Context, userID UserID, language Language) error
 }

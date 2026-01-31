@@ -19,6 +19,16 @@ type RecipeExtraction struct {
 	PrepTime     *time.Duration
 	CookTime     *time.Duration
 	Servings     *int
+	Category     string
+	Cuisine      string
+	DietaryTags  []string
+	Tags         []string
+
+	// Multilingual support
+	SourceLanguage         string            // ISO 639-1 language code (en, pt, es, etc.)
+	TranslatedTitle        *string           // English translation (nil if source is English)
+	TranslatedIngredients  []IngredientData  // English translations (nil if source is English)
+	TranslatedInstructions []InstructionData // English translations (nil if source is English)
 }
 
 // IngredientData represents ingredient information from LLM

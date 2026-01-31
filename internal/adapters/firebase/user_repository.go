@@ -31,19 +31,35 @@ func NewUserRepository(client *firestore.Client) *UserRepository {
 
 // userDoc represents the Firestore document structure for users
 type userDoc struct {
-	UserID     string    `firestore:"userId"`
-	TelegramID int64     `firestore:"telegramId"`
-	Username   string    `firestore:"username"`
-	CreatedAt  time.Time `firestore:"createdAt"`
+	UserID          string     `firestore:"userId"`
+	TelegramID      int64      `firestore:"telegramId"`
+	Username        string     `firestore:"username"`
+	Language        string     `firestore:"language,omitempty"`
+	CreatedAt       time.Time  `firestore:"createdAt"`
+	PantryItems     []string   `firestore:"pantryItems,omitempty"`
+	PantryUpdatedAt *time.Time `firestore:"pantryUpdatedAt,omitempty"`
+
+	// Notion integration
+	NotionAccessToken string     `firestore:"notionAccessToken,omitempty"`
+	NotionWorkspaceID string     `firestore:"notionWorkspaceId,omitempty"`
+	NotionDatabaseID  string     `firestore:"notionDatabaseId,omitempty"`
+	NotionConnectedAt *time.Time `firestore:"notionConnectedAt,omitempty"`
 }
 
 // Save persists a user to Firestore
 func (r *UserRepository) Save(ctx context.Context, u *user.User) error {
 	doc := &userDoc{
-		UserID:     u.ID().String(),
-		TelegramID: u.TelegramID(),
-		Username:   u.Username(),
-		CreatedAt:  u.CreatedAt().Time(),
+		UserID:            u.ID().String(),
+		TelegramID:        u.TelegramID(),
+		Username:          u.Username(),
+		Language:          string(u.Language()),
+		CreatedAt:         u.CreatedAt().Time(),
+		PantryItems:       u.PantryItems(),
+		PantryUpdatedAt:   u.PantryUpdatedAt(),
+		NotionAccessToken: u.NotionAccessToken(),
+		NotionWorkspaceID: u.NotionWorkspaceID(),
+		NotionDatabaseID:  u.NotionDatabaseID(),
+		NotionConnectedAt: u.NotionConnectedAt(),
 	}
 
 	_, err := r.client.Collection("users").Doc(u.ID().String()).Set(ctx, doc)
@@ -109,10 +125,100 @@ func (r *UserRepository) Update(ctx context.Context, u *user.User) error {
 
 // fromDocument converts a Firestore document to a domain User
 func (r *UserRepository) fromDocument(doc *userDoc) *user.User {
-	return user.ReconstructUser(
-		user.UserID(doc.UserID),
-		doc.TelegramID,
-		doc.Username,
-		shared.NewTimestampFromTime(doc.CreatedAt),
-	)
+	return user.ReconstructUserFromData(user.UserData{
+		ID:                user.UserID(doc.UserID),
+		TelegramID:        doc.TelegramID,
+		Username:          doc.Username,
+		Language:          user.Language(doc.Language),
+		CreatedAt:         shared.NewTimestampFromTime(doc.CreatedAt),
+		PantryItems:       doc.PantryItems,
+		PantryUpdatedAt:   doc.PantryUpdatedAt,
+		NotionAccessToken: doc.NotionAccessToken,
+		NotionWorkspaceID: doc.NotionWorkspaceID,
+		NotionDatabaseID:  doc.NotionDatabaseID,
+		NotionConnectedAt: doc.NotionConnectedAt,
+	})
+}
+
+// UpdateLanguage updates only the language preference for a user
+func (r *UserRepository) UpdateLanguage(ctx context.Context, userID user.UserID, language user.Language) error {
+	_, err := r.client.Collection("users").Doc(userID.String()).Update(ctx, []firestore.Update{
+		{Path: "language", Value: string(language)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update language: %w", err)
+	}
+	return nil
+}
+
+// UpdatePantry updates only the pantry items for a user
+func (r *UserRepository) UpdatePantry(ctx context.Context, userID user.UserID, items []string) error {
+	now := time.Now()
+	_, err := r.client.Collection("users").Doc(userID.String()).Update(ctx, []firestore.Update{
+		{Path: "pantryItems", Value: items},
+		{Path: "pantryUpdatedAt", Value: now},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update pantry: %w", err)
+	}
+	return nil
+}
+
+// GetPantry retrieves the pantry items for a user
+func (r *UserRepository) GetPantry(ctx context.Context, userID user.UserID) ([]string, error) {
+	doc, err := r.client.Collection("users").Doc(userID.String()).Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pantry: %w", err)
+	}
+
+	var userDoc userDoc
+	if err := doc.DataTo(&userDoc); err != nil {
+		return nil, fmt.Errorf("failed to parse user document: %w", err)
+	}
+
+	return userDoc.PantryItems, nil
+}
+
+// UpdateNotionConnection updates the Notion connection for a user
+func (r *UserRepository) UpdateNotionConnection(ctx context.Context, userID user.UserID, accessToken, workspaceID, databaseID string) error {
+	now := time.Now()
+	_, err := r.client.Collection("users").Doc(userID.String()).Update(ctx, []firestore.Update{
+		{Path: "notionAccessToken", Value: accessToken},
+		{Path: "notionWorkspaceId", Value: workspaceID},
+		{Path: "notionDatabaseId", Value: databaseID},
+		{Path: "notionConnectedAt", Value: now},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update Notion connection: %w", err)
+	}
+	return nil
+}
+
+// ClearNotionConnection removes the Notion connection for a user
+func (r *UserRepository) ClearNotionConnection(ctx context.Context, userID user.UserID) error {
+	_, err := r.client.Collection("users").Doc(userID.String()).Update(ctx, []firestore.Update{
+		{Path: "notionAccessToken", Value: ""},
+		{Path: "notionWorkspaceId", Value: ""},
+		{Path: "notionDatabaseId", Value: ""},
+		{Path: "notionConnectedAt", Value: nil},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to clear Notion connection: %w", err)
+	}
+	return nil
+}
+
+// GetNotionConnection retrieves Notion connection details for a user
+func (r *UserRepository) GetNotionConnection(ctx context.Context, userID user.UserID) (accessToken, workspaceID, databaseID string, connectedAt *time.Time, err error) {
+	doc, err := r.client.Collection("users").Doc(userID.String()).Get(ctx)
+	if err != nil {
+		return "", "", "", nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	var userDoc userDoc
+	if err := doc.DataTo(&userDoc); err != nil {
+		return "", "", "", nil, fmt.Errorf("failed to parse user document: %w", err)
+	}
+
+	return userDoc.NotionAccessToken, userDoc.NotionWorkspaceID, userDoc.NotionDatabaseID, userDoc.NotionConnectedAt, nil
 }
