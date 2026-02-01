@@ -4,7 +4,7 @@
 
 [build]
 builder = "dockerfile"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "python-service/Dockerfile"
 
 [deploy]
 healthcheckTimeout = 300
