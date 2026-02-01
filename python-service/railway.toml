@@ -2,10 +2,6 @@
 # This is the gRPC service for video scraping and transcription
 # IMPORTANT: Set Root Directory to "python-service" in Railway dashboard
 
-[build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile"
-
 [deploy]
 restartPolicyType = "always"
 numReplicas = 1
