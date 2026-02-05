@@ -12,7 +12,7 @@ python = "^3.11"
 # gRPC
 grpcio = "^1.66.1"
 grpcio-tools = "^1.66.1"
-protobuf = "^5.28.3"
+protobuf = "^5.29.6"
 
 # Video downloading
 yt-dlp = "^2024.12.6"
