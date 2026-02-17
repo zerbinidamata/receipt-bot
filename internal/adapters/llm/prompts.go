@@ -76,8 +76,15 @@ Rules for extraction:
 - Instructions may be numbered or use bullets - extract step numbers sequentially
 - Include time estimates if mentioned (in minutes)
 - Use null for missing information
-- Standardize units (cups, tsp, tbsp, g, ml, oz, lb, etc.)
-- If quantities are ranges (e.g., "2-3 cups"), use the average or pick one
+- ALWAYS convert measurements to METRIC SYSTEM:
+  - oz → g (1 oz = 28g)
+  - cups → ml (1 cup = 240ml)
+  - tbsp → ml (1 tbsp = 15ml)
+  - tsp → ml (1 tsp = 5ml)
+  - lbs/lb → g (1 lb = 454g)
+  - °F → °C in instructions (formula: (F-32) × 5/9)
+  - Use g, ml, L, °C as units
+- If quantities are ranges (e.g., "2-3 cups"), use the average and convert to metric
 - Keep instruction text concise but complete
 - Extract prep time, cook time, and servings if mentioned
 - For category: Choose the BEST matching category based on the main dish type
@@ -92,7 +99,7 @@ MULTILINGUAL RULES:
 - If source is NOT English: Provide English translations in the translated_* fields
 - Keep original language content in the main fields (title, ingredients, instructions)
 - Category and dietary_tags should ALWAYS be in English
-- Units should be standardized (cups, tsp, tbsp, g, ml, oz, lb, etc.)`
+- Units should ALWAYS be metric (g, ml, L, °C) - convert from imperial if needed`
 
 // BuildUserPrompt builds the user prompt with the provided text
 func BuildUserPrompt(combinedText string) string {

@@ -352,7 +352,13 @@ Return ONLY valid JSON in this exact format:
 
 IMPORTANT:
 - Translate ALL text to %s
-- Keep quantities and measurements accurate
+- Convert ALL measurements to metric system (grams, ml, liters, celsius):
+  - oz → grams (1 oz = 28g)
+  - cups → ml (1 cup = 240ml)
+  - tbsp → ml (1 tbsp = 15ml)
+  - tsp → ml (1 tsp = 5ml)
+  - lbs → grams (1 lb = 454g)
+  - °F → °C (formula: (F-32) × 5/9)
 - Preserve step numbers
 - Keep cooking terms natural in the target language`, targetLang, recipe.Title, strings.Join(ingredients, "\n"), strings.Join(instructions, "\n"), targetLang)
 
