@@ -166,15 +166,44 @@ func (h *Handler) handleTextMessage(ctx context.Context, message *tgbotapi.Messa
 		return
 	}
 
+	// Check conversation state first - handle clarification responses
+	state := h.conversationManager.GetState(userID)
+	if state == StateAwaitingClarification {
+		h.handleClarificationResponse(ctx, chatID, userID, text, usr.Language())
+		return
+	}
+
 	// Try to detect intent from natural language
 	if h.intentDetector != nil {
-		intent, err := h.intentDetector.DetectIntent(ctx, text)
+		// Get conversation history for context-aware detection
+		history := h.conversationManager.GetHistory(userID)
+
+		var intent *ports.Intent
+		var err error
+
+		// Use context-aware detection if we have history
+		if len(history) > 0 {
+			intent, err = h.intentDetector.DetectIntentWithContext(ctx, text, history)
+		} else {
+			intent, err = h.intentDetector.DetectIntent(ctx, text)
+		}
+
 		if err != nil {
 			log.Printf("Intent detection error: %v", err)
 			// Fall through to default message
 		} else if intent != nil && intent.Type != ports.IntentUnknown && intent.Confidence >= 0.6 {
-			h.handleIntent(ctx, chatID, userID, intent, usr.Language())
-			return
+			// Check NextAction to determine how to proceed
+			switch intent.NextAction {
+			case ports.ActionClarify:
+				h.handleClarification(ctx, chatID, userID, text, intent)
+				return
+			case ports.ActionRefine:
+				h.handleRefine(ctx, chatID, userID, intent, usr.Language())
+				return
+			default: // ActionExecute or empty
+				h.handleIntent(ctx, chatID, userID, intent, usr.Language())
+				return
+			}
 		}
 	}
 
@@ -233,6 +262,9 @@ func (h *Handler) handleIntent(ctx context.Context, chatID int64, userID shared.
 
 	case ports.IntentCompoundQuery:
 		h.handleCompoundQuery(ctx, chatID, userID, intent.Category, intent.DietaryTags)
+
+	case ports.IntentComplexSearch:
+		h.handleComplexSearch(ctx, chatID, userID, intent.IngredientFilter, intent.DietaryTags)
 
 	default:
 		_ = h.bot.SendMessage(ctx, chatID,
@@ -484,6 +516,150 @@ func (h *Handler) handleRepeatLast(ctx context.Context, chatID int64, userID sha
 	}
 }
 
+// handleClarification sends a clarifying question to the user
+func (h *Handler) handleClarification(ctx context.Context, chatID int64, userID shared.ID, originalMessage string, intent *ports.Intent) {
+	// Set pending clarification in conversation manager
+	h.conversationManager.SetPendingClarification(userID, &PendingClarification{
+		OriginalMessage: originalMessage,
+		Question:        intent.ClarifyingQuestion,
+		Options:         intent.ClarifyingOptions,
+	})
+
+	// Add the user's message to history
+	h.conversationManager.AddTurn(userID, "user", originalMessage)
+
+	// Build the clarification message with options
+	msg := intent.ClarifyingQuestion
+	if len(intent.ClarifyingOptions) > 0 {
+		msg += "\n\nOptions:\n"
+		for i, option := range intent.ClarifyingOptions {
+			msg += fmt.Sprintf("%d. %s\n", i+1, option)
+		}
+		msg += "\nYou can reply with a number or type your preference."
+	}
+
+	// Add the assistant's clarifying question to history
+	h.conversationManager.AddTurn(userID, "assistant", msg)
+
+	_ = h.bot.SendMessage(ctx, chatID, msg)
+}
+
+// handleClarificationResponse handles the user's response to a clarifying question
+func (h *Handler) handleClarificationResponse(ctx context.Context, chatID int64, userID shared.ID, text string, lang user.Language) {
+	pending := h.conversationManager.GetPendingClarification(userID)
+	if pending == nil {
+		// No pending clarification, treat as normal message
+		h.conversationManager.SetState(userID, StateIdle)
+		return
+	}
+
+	// Clear the pending clarification
+	h.conversationManager.ClearPendingClarification(userID)
+
+	// Add the user's response to history
+	h.conversationManager.AddTurn(userID, "user", text)
+
+	// Check if the user selected an option by number
+	selectedText := text
+	if num, err := strconv.Atoi(strings.TrimSpace(text)); err == nil && num > 0 && num <= len(pending.Options) {
+		selectedText = pending.Options[num-1]
+	}
+
+	// Combine the original message with the clarification response for intent detection
+	combinedQuery := pending.OriginalMessage + " " + selectedText
+
+	// Re-run intent detection with the combined context
+	if h.intentDetector != nil {
+		history := h.conversationManager.GetHistory(userID)
+		intent, err := h.intentDetector.DetectIntentWithContext(ctx, combinedQuery, history)
+		if err != nil {
+			log.Printf("Intent detection error after clarification: %v", err)
+		} else if intent != nil && intent.Type != ports.IntentUnknown && intent.Confidence >= 0.5 {
+			h.handleIntent(ctx, chatID, userID, intent, lang)
+			return
+		}
+	}
+
+	// Fallback: couldn't understand the clarification response
+	t := GetTranslations(lang)
+	_ = h.bot.SendMessage(ctx, chatID,
+		"I still couldn't understand that. Let's start over.\n\n"+
+			t.UseHelpCmd)
+}
+
+// handleRefine refines previous search results with new filters
+func (h *Handler) handleRefine(ctx context.Context, chatID int64, userID shared.ID, intent *ports.Intent, lang user.Language) {
+	// Get active filters from conversation manager
+	activeFilters := h.conversationManager.GetActiveFilters(userID)
+
+	// Merge new intent filters with existing active filters
+	mergedFilters := &ActiveFilters{}
+	if activeFilters != nil {
+		// Copy existing filters
+		mergedFilters.Category = activeFilters.Category
+		mergedFilters.DietaryTags = append([]recipe.DietaryTag{}, activeFilters.DietaryTags...)
+		mergedFilters.IngredientFilter = activeFilters.IngredientFilter
+		mergedFilters.SearchTerm = activeFilters.SearchTerm
+	}
+
+	// Apply new filters from intent
+	if intent.Category != nil {
+		mergedFilters.Category = intent.Category
+	}
+	if len(intent.DietaryTags) > 0 {
+		// Add new dietary tags without duplicates
+		existingTags := make(map[recipe.DietaryTag]bool)
+		for _, tag := range mergedFilters.DietaryTags {
+			existingTags[tag] = true
+		}
+		for _, tag := range intent.DietaryTags {
+			if !existingTags[tag] {
+				mergedFilters.DietaryTags = append(mergedFilters.DietaryTags, tag)
+			}
+		}
+	}
+	if intent.IngredientFilter != nil {
+		// Merge ingredient filters
+		if mergedFilters.IngredientFilter == nil {
+			mergedFilters.IngredientFilter = intent.IngredientFilter
+		} else {
+			// Combine Include (AND logic)
+			mergedFilters.IngredientFilter.Include = append(
+				mergedFilters.IngredientFilter.Include,
+				intent.IngredientFilter.Include...,
+			)
+			// Combine Optional (OR logic)
+			mergedFilters.IngredientFilter.Optional = append(
+				mergedFilters.IngredientFilter.Optional,
+				intent.IngredientFilter.Optional...,
+			)
+			// Combine Exclude (NOT logic)
+			mergedFilters.IngredientFilter.Exclude = append(
+				mergedFilters.IngredientFilter.Exclude,
+				intent.IngredientFilter.Exclude...,
+			)
+		}
+	}
+	if intent.SearchTerm != "" {
+		mergedFilters.SearchTerm = intent.SearchTerm
+	}
+
+	// Update active filters
+	h.conversationManager.SetActiveFilters(userID, mergedFilters)
+
+	// Re-execute the search with merged filters
+	if mergedFilters.IngredientFilter != nil {
+		h.handleComplexSearch(ctx, chatID, userID, mergedFilters.IngredientFilter, mergedFilters.DietaryTags)
+	} else if mergedFilters.Category != nil || len(mergedFilters.DietaryTags) > 0 {
+		h.handleCompoundQuery(ctx, chatID, userID, mergedFilters.Category, mergedFilters.DietaryTags)
+	} else if mergedFilters.SearchTerm != "" {
+		h.handleSearchByIngredient(ctx, chatID, userID, mergedFilters.SearchTerm)
+	} else {
+		// No filters to refine, just list recipes
+		h.handleListRecipesNatural(ctx, chatID, userID, nil, "")
+	}
+}
+
 // handleCompoundQuery handles queries combining category and dietary tags
 func (h *Handler) handleCompoundQuery(ctx context.Context, chatID int64, userID shared.ID, category *recipe.Category, dietaryTags []recipe.DietaryTag) {
 	recipes, err := h.listRecipesQuery.ExecuteByFilters(ctx, userID, category, dietaryTags)
@@ -516,6 +692,69 @@ func (h *Handler) handleCompoundQuery(ctx context.Context, chatID int64, userID 
 	if len(recipes) == 0 {
 		msg = fmt.Sprintf("📭 No recipes found matching: %s\n\n"+
 			"Try a different combination or use /categories to see what you have.", filterDesc)
+	} else {
+		for i, recipeDTO := range recipes {
+			if i >= 10 {
+				msg += fmt.Sprintf("\n... and %d more recipes. Say \"show more\" to see them.", len(recipes)-10)
+				break
+			}
+
+			msg += fmt.Sprintf("%d. %s\n", i+1, recipeDTO.Title)
+			msg += fmt.Sprintf("   _%s_ | %s\n", recipeDTO.Category, recipeDTO.SourcePlatform)
+		}
+
+		if len(recipes) <= 10 {
+			msg += "\nSay \"details on #X\" to view a recipe"
+		}
+	}
+
+	_ = h.bot.SendMessage(ctx, chatID, msg)
+}
+
+// handleComplexSearch handles complex ingredient searches with filters and dietary tags
+func (h *Handler) handleComplexSearch(ctx context.Context, chatID int64, userID shared.ID, filter *recipe.IngredientFilter, dietaryTags []recipe.DietaryTag) {
+	recipes, err := h.listRecipesQuery.SearchByIngredientFilterWithTags(ctx, userID, filter, dietaryTags)
+	if err != nil {
+		log.Printf("Error searching recipes with filter: %v", err)
+		_ = h.bot.SendError(ctx, chatID, "Failed to search recipes. Please try again.")
+		return
+	}
+
+	// Build filter description
+	var filterParts []string
+	if filter != nil {
+		if len(filter.Include) > 0 {
+			filterParts = append(filterParts, "with "+strings.Join(filter.Include, " and "))
+		}
+		if len(filter.Optional) > 0 {
+			filterParts = append(filterParts, "with any of: "+strings.Join(filter.Optional, ", "))
+		}
+		if len(filter.Exclude) > 0 {
+			filterParts = append(filterParts, "without "+strings.Join(filter.Exclude, ", "))
+		}
+	}
+	if len(dietaryTags) > 0 {
+		for _, tag := range dietaryTags {
+			filterParts = append(filterParts, string(tag))
+		}
+	}
+	filterDesc := strings.Join(filterParts, ", ")
+	if filterDesc == "" {
+		filterDesc = "filtered"
+	}
+
+	// Store in conversation context
+	h.conversationManager.UpdateLastRecipes(userID, ActionFilterIngredient, recipes)
+	h.conversationManager.SetActiveFilters(userID, &ActiveFilters{
+		DietaryTags:      dietaryTags,
+		IngredientFilter: filter,
+	})
+
+	msg := fmt.Sprintf("🔍 *Recipes %s* (%d found)\n\n", filterDesc, len(recipes))
+
+	if len(recipes) == 0 {
+		msg = fmt.Sprintf("📭 No recipes found matching: %s\n\n"+
+			"Try a different combination or use /recipes to see all your recipes.", filterDesc)
 	} else {
 		for i, recipeDTO := range recipes {
 			if i >= 10 {

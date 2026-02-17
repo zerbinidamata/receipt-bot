@@ -95,6 +95,10 @@ func (m *mockRecipeRepository) SearchByIngredient(ctx context.Context, userID re
 	return m.FindByUserID(ctx, userID) // Simplified for testing
 }
 
+func (m *mockRecipeRepository) SearchByIngredientFilter(ctx context.Context, userID recipe.UserID, filter recipe.IngredientFilter) ([]*recipe.Recipe, error) {
+	return m.FindByUserID(ctx, userID) // Simplified for testing
+}
+
 func (m *mockRecipeRepository) FindBySourceURL(ctx context.Context, sourceURL string) (*recipe.Recipe, error) {
 	return nil, shared.ErrRecipeNotFound
 }

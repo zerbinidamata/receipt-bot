@@ -2,6 +2,13 @@ package recipe
 
 import "context"
 
+// IngredientFilter represents complex ingredient filtering with AND/OR/NOT logic
+type IngredientFilter struct {
+	Include  []string // Ingredients that MUST be in the recipe (AND)
+	Exclude  []string // Ingredients that must NOT be in the recipe (NOT)
+	Optional []string // Nice-to-have ingredients - any of these (OR)
+}
+
 // Repository defines the interface for recipe persistence (Port)
 type Repository interface {
 	// Save persists a recipe
@@ -21,6 +28,9 @@ type Repository interface {
 
 	// SearchByIngredient searches recipes containing a specific ingredient in title or ingredients
 	SearchByIngredient(ctx context.Context, userID UserID, ingredient string) ([]*Recipe, error)
+
+	// SearchByIngredientFilter searches recipes using complex ingredient filters (AND/OR/NOT logic)
+	SearchByIngredientFilter(ctx context.Context, userID UserID, filter IngredientFilter) ([]*Recipe, error)
 
 	// FindBySourceURL retrieves a recipe by its source URL (for duplicate detection)
 	FindBySourceURL(ctx context.Context, sourceURL string) (*Recipe, error)

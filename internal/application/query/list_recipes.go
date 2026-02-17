@@ -111,6 +111,66 @@ func (q *ListRecipesQuery) ExecuteByFilters(ctx context.Context, userID recipe.U
 	return dtos, nil
 }
 
+// SearchByIngredientFilter searches recipes using complex ingredient filters (AND/OR/NOT logic)
+func (q *ListRecipesQuery) SearchByIngredientFilter(ctx context.Context, userID recipe.UserID, filter *recipe.IngredientFilter) ([]*dto.RecipeDTO, error) {
+	if filter == nil {
+		// If no filter provided, return all recipes
+		return q.Execute(ctx, userID)
+	}
+
+	recipes, err := q.recipeRepo.SearchByIngredientFilter(ctx, userID, *filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search recipes by ingredient filter: %w", err)
+	}
+
+	dtos := make([]*dto.RecipeDTO, len(recipes))
+	for i, rec := range recipes {
+		dtos[i] = convertToDTO(rec)
+	}
+
+	return dtos, nil
+}
+
+// SearchByIngredientFilterWithTags combines ingredient filter with dietary tag filtering
+func (q *ListRecipesQuery) SearchByIngredientFilterWithTags(ctx context.Context, userID recipe.UserID, filter *recipe.IngredientFilter, dietaryTags []recipe.DietaryTag) ([]*dto.RecipeDTO, error) {
+	// First apply ingredient filter
+	recipes, err := q.SearchByIngredientFilter(ctx, userID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// If no dietary tags, return as-is
+	if len(dietaryTags) == 0 {
+		return recipes, nil
+	}
+
+	// Filter by dietary tags
+	var filtered []*dto.RecipeDTO
+	for _, rec := range recipes {
+		if hasAllDietaryTags(rec, dietaryTags) {
+			filtered = append(filtered, rec)
+		}
+	}
+
+	return filtered, nil
+}
+
+// hasAllDietaryTags checks if a recipe DTO has all the specified dietary tags
+func hasAllDietaryTags(rec *dto.RecipeDTO, requiredTags []recipe.DietaryTag) bool {
+	recipeTags := make(map[string]bool)
+	for _, tag := range rec.DietaryTags {
+		recipeTags[tag] = true
+	}
+
+	for _, required := range requiredTags {
+		if !recipeTags[string(required)] {
+			return false
+		}
+	}
+
+	return true
+}
+
 // convertToDTO converts a domain Recipe to a DTO
 func convertToDTO(rec *recipe.Recipe) *dto.RecipeDTO {
 	recipeDTO := &dto.RecipeDTO{

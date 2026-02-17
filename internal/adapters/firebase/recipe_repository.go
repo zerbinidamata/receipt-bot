@@ -231,6 +231,96 @@ func (r *RecipeRepository) SearchByIngredient(ctx context.Context, userID recipe
 	return matchingRecipes, nil
 }
 
+// SearchByIngredientFilter searches recipes using complex ingredient filters (AND/OR/NOT logic)
+func (r *RecipeRepository) SearchByIngredientFilter(ctx context.Context, userID recipe.UserID, filter recipe.IngredientFilter) ([]*recipe.Recipe, error) {
+	// Firestore doesn't support complex text search, so we fetch all and filter in-memory
+	allRecipes, err := r.FindByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var matchingRecipes []*recipe.Recipe
+	for _, rec := range allRecipes {
+		if r.matchesIngredientFilter(rec, filter) {
+			matchingRecipes = append(matchingRecipes, rec)
+		}
+	}
+
+	return matchingRecipes, nil
+}
+
+// matchesIngredientFilter checks if a recipe matches the ingredient filter criteria
+func (r *RecipeRepository) matchesIngredientFilter(rec *recipe.Recipe, filter recipe.IngredientFilter) bool {
+	// Get all searchable text from recipe (title + ingredient names)
+	searchableText := r.getSearchableText(rec)
+
+	// All INCLUDE ingredients must be present (AND logic)
+	for _, required := range filter.Include {
+		if !r.containsIngredient(searchableText, required) {
+			return false
+		}
+	}
+
+	// No EXCLUDE ingredients should be present (NOT logic)
+	for _, excluded := range filter.Exclude {
+		if r.containsIngredient(searchableText, excluded) {
+			return false
+		}
+	}
+
+	// Optional: at least one of these should be present (OR logic)
+	// Only apply if there are optional ingredients specified
+	if len(filter.Optional) > 0 {
+		hasAny := false
+		for _, optional := range filter.Optional {
+			if r.containsIngredient(searchableText, optional) {
+				hasAny = true
+				break
+			}
+		}
+		if !hasAny {
+			return false
+		}
+	}
+
+	return true
+}
+
+// getSearchableText extracts all searchable text from a recipe
+func (r *RecipeRepository) getSearchableText(rec *recipe.Recipe) []string {
+	var texts []string
+
+	// Add title
+	texts = append(texts, strings.ToLower(rec.Title()))
+
+	// Add all ingredient names
+	for _, ing := range rec.Ingredients() {
+		texts = append(texts, strings.ToLower(ing.Name()))
+	}
+
+	// Add normalized ingredients if available (for better matching)
+	for _, normalized := range rec.NormalizedIngredients() {
+		texts = append(texts, strings.ToLower(normalized))
+	}
+
+	return texts
+}
+
+// containsIngredient checks if any of the searchable texts contain the ingredient
+func (r *RecipeRepository) containsIngredient(searchableTexts []string, ingredient string) bool {
+	normalizedIngredient := strings.ToLower(strings.TrimSpace(ingredient))
+	if normalizedIngredient == "" {
+		return true // Empty ingredient matches everything
+	}
+
+	for _, text := range searchableTexts {
+		if strings.Contains(text, normalizedIngredient) {
+			return true
+		}
+	}
+	return false
+}
+
 // FindByUserIDAndFilters retrieves recipes for a user with optional category and dietary tag filters
 func (r *RecipeRepository) FindByUserIDAndFilters(ctx context.Context, userID recipe.UserID, category *recipe.Category, dietaryTags []recipe.DietaryTag) ([]*recipe.Recipe, error) {
 	// Start with all user recipes

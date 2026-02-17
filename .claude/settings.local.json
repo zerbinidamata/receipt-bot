@@ -14,7 +14,9 @@
       "Bash(go test:*)",
       "Bash(/opt/homebrew/bin/go test ./internal/domain/recipe/... ./internal/domain/matching/... ./internal/application/query/... -v)",
       "Bash(/opt/homebrew/bin/go test:*)",
-      "Bash(/opt/homebrew/bin/go version:*)"
+      "Bash(/opt/homebrew/bin/go version:*)",
+      "Bash(/opt/homebrew/bin/go build:*)",
+      "Bash(/opt/homebrew/bin/go tool compile:*)"
     ]
   }
 }

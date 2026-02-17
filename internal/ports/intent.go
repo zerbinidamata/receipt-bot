@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"receipt-bot/internal/domain/recipe"
 )
@@ -10,7 +11,25 @@ import (
 type IntentDetector interface {
 	// DetectIntent analyzes text and returns the detected intent
 	DetectIntent(ctx context.Context, text string) (*Intent, error)
+	// DetectIntentWithContext analyzes text with conversation history for context-aware detection
+	DetectIntentWithContext(ctx context.Context, text string, history []ConversationTurn) (*Intent, error)
 }
+
+// ConversationTurn represents a single exchange in conversation history
+type ConversationTurn struct {
+	Role      string    // "user" or "assistant"
+	Content   string    // The message text
+	Timestamp time.Time
+}
+
+// ConversationAction tells the handler what to do next
+type ConversationAction string
+
+const (
+	ActionExecute ConversationAction = "EXECUTE" // Execute the intent immediately
+	ActionClarify ConversationAction = "CLARIFY" // Ask user for clarification
+	ActionRefine  ConversationAction = "REFINE"  // Refine previous results
+)
 
 // IntentType represents the type of user intent
 type IntentType string
@@ -31,6 +50,9 @@ const (
 	IntentShowDetails   IntentType = "SHOW_DETAILS"   // "details on #3", "show me the first one"
 	IntentRepeatLast    IntentType = "REPEAT_LAST"    // "show again", "repeat"
 	IntentCompoundQuery IntentType = "COMPOUND_QUERY" // "quick pasta recipes", "vegan breakfast"
+
+	// Complex search with multiple ingredients
+	IntentComplexSearch IntentType = "COMPLEX_SEARCH" // "salmon and sriracha", "pasta without dairy"
 )
 
 // PantryAction represents the type of pantry management action
@@ -60,6 +82,9 @@ type Intent struct {
 	// SearchTerm is set for FILTER_INGREDIENT intent (specific ingredient to search for)
 	SearchTerm string
 
+	// IngredientFilter is set for COMPLEX_SEARCH intent (multiple ingredients with AND/OR/NOT)
+	IngredientFilter *recipe.IngredientFilter
+
 	// PantryAction is set for MANAGE_PANTRY intent
 	PantryAction PantryAction
 
@@ -74,4 +99,18 @@ type Intent struct {
 
 	// RawResponse is the original text for debugging
 	RawResponse string
+
+	// === Conversation control fields ===
+
+	// NextAction tells the handler what to do (EXECUTE, CLARIFY, or REFINE)
+	NextAction ConversationAction
+
+	// ClarifyingQuestion is the question to ask user if NextAction is CLARIFY
+	ClarifyingQuestion string
+
+	// ClarifyingOptions are suggested options for clarification
+	ClarifyingOptions []string
+
+	// RefersToLast indicates if this intent references previous results
+	RefersToLast bool
 }
