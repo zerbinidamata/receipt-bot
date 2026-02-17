@@ -105,12 +105,13 @@ Rules:
 - ALWAYS return category names in ENGLISH regardless of input language
 - For FILTER_CATEGORY: Set "category" to the closest matching category from the list (NO dietary tags)
 - For COMPOUND_QUERY: Set BOTH "category" AND "dietaryTags" when user combines them
-- For FILTER_INGREDIENT: Set "searchTerm" to the specific ingredient (in the language user provided)
-- For MATCH_INGREDIENTS: Extract all ingredients mentioned into "ingredients" array
-- For MANAGE_PANTRY: Set "pantryAction" and "pantryItems" if adding/removing
+- For FILTER_INGREDIENT: Set "searchTerm" to the ingredient translated to ENGLISH
+- For MATCH_INGREDIENTS: Extract all ingredients mentioned into "ingredients" array, translated to ENGLISH
+- For MANAGE_PANTRY: Set "pantryAction" and "pantryItems" if adding/removing (translate items to ENGLISH)
 - For SHOW_DETAILS: Set "recipeNumber" to the 1-based index
 - Confidence should be 0.9+ for clear intents, 0.7-0.9 for likely matches, below 0.7 for uncertain
-- If a message mentions a specific food item but doesn't say "I have"/"tenho", treat it as FILTER_INGREDIENT`
+- If a message mentions a specific food item but doesn't say "I have"/"tenho", treat it as FILTER_INGREDIENT
+- ALWAYS translate ingredient names to ENGLISH in searchTerm, ingredients, and pantryItems fields (e.g., "frango" -> "chicken", "carne" -> "beef")`
 
 // IntentPromptWithContext is the enhanced prompt that includes conversation history
 const IntentPromptWithContext = `You are a conversational assistant for a recipe bot. Analyze the user message IN CONTEXT of the conversation history and determine both the intent AND the best next action.
@@ -180,6 +181,7 @@ vegetarian, vegan, gluten-free, dairy-free, low-carb, quick, one-pot, kid-friend
 - "without X", "no X", "sem X" = must NOT have -> exclude: ["X"]
 - Can combine: "pasta with tomato but without cream" -> include: ["pasta", "tomato"], exclude: ["cream"]
 - For "without dairy", expand to common dairy items: exclude: ["dairy", "milk", "cheese", "cream", "butter"]
+- ALWAYS translate ingredient names to ENGLISH in searchTerm, ingredients, ingredientFilter, and pantryItems fields (e.g., "frango" -> "chicken", "carne" -> "beef", "salmão" -> "salmon")
 
 ## CLARIFICATION RULES:
 - Ask for clarification when the request is vague:
