@@ -154,6 +154,7 @@ func main() {
 		ExportRecipeCommand:      exportRecipeCmd,
 		IntentDetector:           intentDetector,
 		UserRepo:                 userRepo,
+		LLM:                      llmAdapter,
 	})
 
 	// Setup graceful shutdown

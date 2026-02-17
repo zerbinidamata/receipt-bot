@@ -300,3 +300,119 @@ func convertJSONToExtraction(recipe *recipeJSON) *ports.RecipeExtraction {
 
 	return extraction
 }
+
+// TranslateRecipe translates a recipe to the target language
+func (a *GeminiAdapter) TranslateRecipe(ctx context.Context, recipe *ports.RecipeTranslationInput, targetLang string) (*ports.RecipeTranslationOutput, error) {
+	model := a.client.GenerativeModel(a.model)
+
+	// Configure model for JSON output
+	model.SetTemperature(0.3)
+	model.ResponseMIMEType = "application/json"
+
+	// Build ingredients list
+	var ingredients []string
+	for _, ing := range recipe.Ingredients {
+		ingStr := ing.Name
+		if ing.Quantity != "" {
+			ingStr = ing.Quantity + " " + ing.Unit + " " + ing.Name
+		}
+		if ing.Notes != "" {
+			ingStr += " (" + ing.Notes + ")"
+		}
+		ingredients = append(ingredients, ingStr)
+	}
+
+	// Build instructions list
+	var instructions []string
+	for _, inst := range recipe.Instructions {
+		instructions = append(instructions, inst.Text)
+	}
+
+	// Build prompt
+	prompt := fmt.Sprintf(`Translate this recipe to %s. Keep the same structure and format.
+
+Title: %s
+
+Ingredients:
+%s
+
+Instructions:
+%s
+
+Return ONLY valid JSON in this exact format:
+{
+  "title": "translated title",
+  "ingredients": [
+    {"name": "ingredient name", "quantity": "amount", "unit": "unit", "notes": "any notes"}
+  ],
+  "instructions": [
+    {"step_number": 1, "text": "instruction text"}
+  ]
+}
+
+IMPORTANT:
+- Translate ALL text to %s
+- Keep quantities and measurements accurate
+- Preserve step numbers
+- Keep cooking terms natural in the target language`, targetLang, recipe.Title, strings.Join(ingredients, "\n"), strings.Join(instructions, "\n"), targetLang)
+
+	// Add timeout
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Generate content
+	resp, err := model.GenerateContent(ctxWithTimeout, genai.Text(prompt))
+	if err != nil {
+		return nil, fmt.Errorf("translation failed: %w", err)
+	}
+
+	// Extract text from response
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response from Gemini for translation")
+	}
+
+	var responseText string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if textPart, ok := part.(genai.Text); ok {
+			responseText += string(textPart)
+		}
+	}
+
+	// Clean up response
+	cleanedResponse := cleanJSONResponse(responseText)
+
+	// Parse JSON response
+	var translationResp struct {
+		Title        string            `json:"title"`
+		Ingredients  []ingredientJSON  `json:"ingredients"`
+		Instructions []instructionJSON `json:"instructions"`
+	}
+	if err := json.Unmarshal([]byte(cleanedResponse), &translationResp); err != nil {
+		return nil, fmt.Errorf("failed to parse translation response: %w", err)
+	}
+
+	// Convert to output format
+	output := &ports.RecipeTranslationOutput{
+		Title:        translationResp.Title,
+		Ingredients:  make([]ports.IngredientData, len(translationResp.Ingredients)),
+		Instructions: make([]ports.InstructionData, len(translationResp.Instructions)),
+	}
+
+	for i, ing := range translationResp.Ingredients {
+		output.Ingredients[i] = ports.IngredientData{
+			Name:     ing.Name,
+			Quantity: ing.Quantity,
+			Unit:     ing.Unit,
+			Notes:    ing.Notes,
+		}
+	}
+
+	for i, inst := range translationResp.Instructions {
+		output.Instructions[i] = ports.InstructionData{
+			StepNumber: inst.StepNumber,
+			Text:       inst.Text,
+		}
+	}
+
+	return output, nil
+}

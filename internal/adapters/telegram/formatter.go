@@ -6,6 +6,7 @@ import (
 
 	"receipt-bot/internal/application/dto"
 	"receipt-bot/internal/domain/recipe"
+	"receipt-bot/internal/domain/user"
 )
 
 // FormatRecipe formats a recipe for Telegram display
@@ -69,6 +70,103 @@ func FormatRecipe(rec *recipe.Recipe) string {
 
 	if rec.Source().Author() != "" {
 		sb.WriteString(fmt.Sprintf("By: %s\n", escapeMarkdown(rec.Source().Author())))
+	}
+
+	return sb.String()
+}
+
+// TranslatedRecipeDTO holds translated recipe content for display
+type TranslatedRecipeDTO struct {
+	Title        string
+	Ingredients  []dto.IngredientDTO
+	Instructions []dto.InstructionDTO
+}
+
+// FormatRecipeDTOWithTranslation formats a recipe DTO with optional translation
+func FormatRecipeDTOWithTranslation(rec *dto.RecipeDTO, translation *TranslatedRecipeDTO, lang user.Language) string {
+	var sb strings.Builder
+
+	// Use translation if available, otherwise original
+	title := rec.Title
+	ingredients := rec.Ingredients
+	instructions := rec.Instructions
+
+	if translation != nil && lang == user.LanguagePortuguese {
+		title = translation.Title
+		ingredients = translation.Ingredients
+		instructions = translation.Instructions
+	}
+
+	// Get translations for labels
+	t := GetTranslations(lang)
+
+	// Title
+	sb.WriteString(fmt.Sprintf("🍳 *%s*\n\n", escapeMarkdown(title)))
+
+	// Metadata
+	sb.WriteString(fmt.Sprintf("📊 *%s*\n", t.Info))
+
+	if rec.PrepTimeMinutes != nil {
+		sb.WriteString(fmt.Sprintf("⏱️ %s: %d min\n", t.Prep, *rec.PrepTimeMinutes))
+	}
+
+	if rec.CookTimeMinutes != nil {
+		sb.WriteString(fmt.Sprintf("🔥 %s: %d min\n", t.Cook, *rec.CookTimeMinutes))
+	}
+
+	if rec.Servings != nil {
+		sb.WriteString(fmt.Sprintf("🍽️ %s: %d\n", t.Servings, *rec.Servings))
+	}
+
+	// Category info
+	if rec.Category != "" {
+		translatedCategory := TranslateCategory(rec.Category, lang)
+		sb.WriteString(fmt.Sprintf("📁 %s: %s\n", t.Category, escapeMarkdown(translatedCategory)))
+	}
+
+	if rec.Cuisine != "" {
+		sb.WriteString(fmt.Sprintf("🌍 %s: %s\n", t.Cuisine, escapeMarkdown(rec.Cuisine)))
+	}
+
+	if len(rec.DietaryTags) > 0 {
+		tags := make([]string, len(rec.DietaryTags))
+		for i, tag := range rec.DietaryTags {
+			tags[i] = "#" + TranslateDietaryTag(tag, lang)
+		}
+		sb.WriteString(fmt.Sprintf("🏷️ %s: %s\n", t.Tags, escapeMarkdown(strings.Join(tags, " "))))
+	}
+
+	sb.WriteString("\n")
+
+	// Ingredients
+	sb.WriteString(fmt.Sprintf("📝 *%s*\n", t.Ingredients))
+	for _, ing := range ingredients {
+		ingStr := ing.Name
+		if ing.Quantity != "" {
+			ingStr = ing.Quantity + " " + ing.Unit + " " + ing.Name
+		}
+		if ing.Notes != "" {
+			ingStr += " (" + ing.Notes + ")"
+		}
+		sb.WriteString(fmt.Sprintf("• %s\n", escapeMarkdown(ingStr)))
+	}
+	sb.WriteString("\n")
+
+	// Instructions
+	sb.WriteString(fmt.Sprintf("👨‍🍳 *%s*\n", t.Instructions))
+	for _, inst := range instructions {
+		sb.WriteString(fmt.Sprintf("%d\\. %s\n", inst.StepNumber, escapeMarkdown(inst.Text)))
+	}
+	sb.WriteString("\n")
+
+	// Source
+	sb.WriteString(fmt.Sprintf("🔗 *%s*\n", t.Source))
+	sb.WriteString(fmt.Sprintf("[%s](%s)\n",
+		escapeMarkdown(rec.SourcePlatform),
+		rec.SourceURL))
+
+	if rec.SourceAuthor != "" {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", t.By, escapeMarkdown(rec.SourceAuthor)))
 	}
 
 	return sb.String()

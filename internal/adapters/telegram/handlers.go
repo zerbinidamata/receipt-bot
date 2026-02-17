@@ -29,6 +29,7 @@ type Handler struct {
 	intentDetector           ports.IntentDetector
 	conversationManager      *ConversationManager
 	userRepo                 user.Repository
+	llm                      ports.LLMPort
 }
 
 // HandlerConfig contains all dependencies for the Handler
@@ -42,6 +43,7 @@ type HandlerConfig struct {
 	ExportRecipeCommand      *command.ExportRecipeCommand
 	IntentDetector           ports.IntentDetector
 	UserRepo                 user.Repository
+	LLM                      ports.LLMPort
 }
 
 // NewHandler creates a new message handler
@@ -57,6 +59,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		intentDetector:           cfg.IntentDetector,
 		conversationManager:      NewConversationManager(),
 		userRepo:                 cfg.UserRepo,
+		llm:                      cfg.LLM,
 	}
 }
 
@@ -125,7 +128,7 @@ func (h *Handler) handleCommand(ctx context.Context, message *tgbotapi.Message, 
 		h.handleListRecipes(ctx, message, userID)
 
 	case "recipe":
-		h.handleGetRecipe(ctx, message, userID)
+		h.handleGetRecipe(ctx, message, userID, lang)
 
 	case "categories":
 		h.handleCategories(ctx, chatID, userID)
@@ -255,7 +258,7 @@ func (h *Handler) handleIntent(ctx context.Context, chatID int64, userID shared.
 		h.handleShowMore(ctx, chatID, userID)
 
 	case ports.IntentShowDetails:
-		h.handleShowDetails(ctx, chatID, userID, intent.RecipeNumber)
+		h.handleShowDetails(ctx, chatID, userID, intent.RecipeNumber, lang)
 
 	case ports.IntentRepeatLast:
 		h.handleRepeatLast(ctx, chatID, userID)
@@ -448,7 +451,7 @@ func (h *Handler) handleShowMore(ctx context.Context, chatID int64, userID share
 }
 
 // handleShowDetails shows details of a specific recipe from the last results
-func (h *Handler) handleShowDetails(ctx context.Context, chatID int64, userID shared.ID, recipeNumber int) {
+func (h *Handler) handleShowDetails(ctx context.Context, chatID int64, userID shared.ID, recipeNumber int, lang user.Language) {
 	convCtx := h.conversationManager.GetContext(userID)
 	if convCtx == nil || len(convCtx.LastRecipes) == 0 {
 		_ = h.bot.SendMessage(ctx, chatID,
@@ -468,7 +471,19 @@ func (h *Handler) handleShowDetails(ctx context.Context, chatID int64, userID sh
 	}
 
 	recipeDTO := convCtx.LastRecipes[recipeNumber-1]
-	messageText := FormatRecipeDTO(recipeDTO)
+
+	// Translate recipe if user language is Portuguese and we have LLM
+	var translation *TranslatedRecipeDTO
+	if lang == user.LanguagePortuguese && h.llm != nil {
+		translated, err := h.translateRecipe(ctx, recipeDTO, "Portuguese")
+		if err != nil {
+			log.Printf("Translation error (showing original): %v", err)
+		} else {
+			translation = translated
+		}
+	}
+
+	messageText := FormatRecipeDTOWithTranslation(recipeDTO, translation, lang)
 	_ = h.bot.SendMessage(ctx, chatID, messageText)
 
 	// Update context to track that user viewed a recipe
@@ -476,6 +491,63 @@ func (h *Handler) handleShowDetails(ctx context.Context, chatID int64, userID sh
 		LastAction:  ActionViewRecipe,
 		LastRecipes: convCtx.LastRecipes,
 	})
+}
+
+// translateRecipe translates a recipe DTO to the target language using LLM
+func (h *Handler) translateRecipe(ctx context.Context, rec *dto.RecipeDTO, targetLang string) (*TranslatedRecipeDTO, error) {
+	// Build input for translation
+	input := &ports.RecipeTranslationInput{
+		Title:        rec.Title,
+		Ingredients:  make([]ports.IngredientData, len(rec.Ingredients)),
+		Instructions: make([]ports.InstructionData, len(rec.Instructions)),
+	}
+
+	for i, ing := range rec.Ingredients {
+		input.Ingredients[i] = ports.IngredientData{
+			Name:     ing.Name,
+			Quantity: ing.Quantity,
+			Unit:     ing.Unit,
+			Notes:    ing.Notes,
+		}
+	}
+
+	for i, inst := range rec.Instructions {
+		input.Instructions[i] = ports.InstructionData{
+			StepNumber: inst.StepNumber,
+			Text:       inst.Text,
+		}
+	}
+
+	// Call LLM for translation
+	output, err := h.llm.TranslateRecipe(ctx, input, targetLang)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to TranslatedRecipeDTO
+	result := &TranslatedRecipeDTO{
+		Title:        output.Title,
+		Ingredients:  make([]dto.IngredientDTO, len(output.Ingredients)),
+		Instructions: make([]dto.InstructionDTO, len(output.Instructions)),
+	}
+
+	for i, ing := range output.Ingredients {
+		result.Ingredients[i] = dto.IngredientDTO{
+			Name:     ing.Name,
+			Quantity: ing.Quantity,
+			Unit:     ing.Unit,
+			Notes:    ing.Notes,
+		}
+	}
+
+	for i, inst := range output.Instructions {
+		result.Instructions[i] = dto.InstructionDTO{
+			StepNumber: inst.StepNumber,
+			Text:       inst.Text,
+		}
+	}
+
+	return result, nil
 }
 
 // handleRepeatLast repeats the last action/query
@@ -847,7 +919,7 @@ func (h *Handler) handleRecipeLink(ctx context.Context, chatID int64, userID sha
 }
 
 // handleGetRecipe shows a specific recipe by number
-func (h *Handler) handleGetRecipe(ctx context.Context, message *tgbotapi.Message, userID shared.ID) {
+func (h *Handler) handleGetRecipe(ctx context.Context, message *tgbotapi.Message, userID shared.ID, lang user.Language) {
 	chatID := message.Chat.ID
 	args := message.CommandArguments()
 
@@ -869,8 +941,19 @@ func (h *Handler) handleGetRecipe(ctx context.Context, message *tgbotapi.Message
 		return
 	}
 
+	// Translate recipe if user language is Portuguese and we have LLM
+	var translation *TranslatedRecipeDTO
+	if lang == user.LanguagePortuguese && h.llm != nil {
+		translated, err := h.translateRecipe(ctx, recipeDTO, "Portuguese")
+		if err != nil {
+			log.Printf("Translation error (showing original): %v", err)
+		} else {
+			translation = translated
+		}
+	}
+
 	// Format and send the recipe
-	messageText := FormatRecipeDTO(recipeDTO)
+	messageText := FormatRecipeDTOWithTranslation(recipeDTO, translation, lang)
 	_ = h.bot.SendMessage(ctx, chatID, messageText)
 }
 

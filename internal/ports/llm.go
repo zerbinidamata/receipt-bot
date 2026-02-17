@@ -9,6 +9,23 @@ import (
 type LLMPort interface {
 	// ExtractRecipe parses text into structured recipe format
 	ExtractRecipe(ctx context.Context, text string) (*RecipeExtraction, error)
+
+	// TranslateRecipe translates a recipe to the target language
+	TranslateRecipe(ctx context.Context, recipe *RecipeTranslationInput, targetLang string) (*RecipeTranslationOutput, error)
+}
+
+// RecipeTranslationInput contains the recipe data to translate
+type RecipeTranslationInput struct {
+	Title        string
+	Ingredients  []IngredientData
+	Instructions []InstructionData
+}
+
+// RecipeTranslationOutput contains the translated recipe data
+type RecipeTranslationOutput struct {
+	Title        string
+	Ingredients  []IngredientData
+	Instructions []InstructionData
 }
 
 // RecipeExtraction contains the structured recipe data extracted by LLM
