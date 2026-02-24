@@ -15,7 +15,7 @@ grpcio-tools = "^1.66.1"
 protobuf = "^5.28.3"
 
 # Video downloading
-yt-dlp = "^2024.12.6"
+yt-dlp = "^2026.2.21"
 
 # Instagram scraping
 instaloader = "^4.13.1"
